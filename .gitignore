@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Environment
+.env
+.env.local
+*.env
+
+# IDEs
+.vscode/
+.idea/
+*.sublime-*
+
+# Storage
+backend/storage/uploads/*
+!backend/storage/uploads/.gitkeep
+backend/storage/exports/*
+!backend/storage/exports/.gitkeep
+
+# Models cache
+backend/models_cache/*
+!backend/models_cache/.gitkeep
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Database
+*.db
+*.sqlite
+
+# Redis
+dump.rdb
+
+# Exports
+*.zip
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Temporary
+*.tmp
+*.temp
+*.swp
+
+Sorty_PRD (1).md
