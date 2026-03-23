@@ -56,8 +56,8 @@ class AssetMetadata(Base):
 
     # Category classification
     primary_category: Mapped[str | None] = mapped_column(Text, nullable=True)
-    category_scores_json: Mapped[dict] = mapped_column(
-        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    category_scores_json: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
     )
 
     # CLIP embedding vector (512-dim)
