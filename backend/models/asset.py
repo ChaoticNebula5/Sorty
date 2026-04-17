@@ -20,6 +20,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backend.database import Base
+from backend.storage import get_storage
 import enum
 
 
@@ -122,6 +123,14 @@ class Asset(Base):
         cascade="all, delete-orphan",
         lazy="selectin",
     )
+
+    @property
+    def url(self) -> str:
+        return get_storage().get_url(self.storage_key)
+
+    @property
+    def thumbnail_url(self) -> str:
+        return get_storage().get_url(get_storage().get_thumbnail_key(self.storage_key))
 
     def __repr__(self) -> str:
         return f"<Asset(id={self.id}, filename={self.filename!r}, status={self.processing_status.value})>"
