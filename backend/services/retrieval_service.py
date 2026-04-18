@@ -1,15 +1,16 @@
 """
 Retrieval service layer.
-Handles asset listing, smart views, and hybrid search.
+Handles asset listing, smart views, and PRD-aligned hybrid search.
 """
 
 from uuid import UUID
 
-from sqlalchemy import and_, case, desc, func, or_, select
+from sqlalchemy import Float, case, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from backend.models import Asset, AssetMetadata
+from backend.ai.embedder import get_embedder
+from backend.models import Asset, AssetMetadata, Override, OverrideType
 from backend.schemas.asset import AssetListData, AssetListResponse, AssetResponse
 from backend.schemas.search import (
     SearchRequest,
@@ -18,6 +19,10 @@ from backend.schemas.search import (
     SearchResultItem,
     SearchScore,
 )
+
+
+VECTOR_CANDIDATE_LIMIT = 200
+SPONSOR_THRESHOLD = 0.40
 
 
 class RetrievalService:
@@ -38,12 +43,19 @@ class RetrievalService:
         exclude_low_quality: bool = False,
     ) -> AssetListResponse:
         """List event assets with smart view filters."""
+        effective_duplicate_hidden = self._effective_duplicate_hidden_expr()
+        effective_low_quality_flag = self._effective_low_quality_flag_expr()
+        effective_sponsor_visible = self._effective_sponsor_visible_expr()
+
         filters = [Asset.event_id == event_id]
         filters.extend(
             self._build_asset_filters(
                 view=view,
                 exclude_duplicates=exclude_duplicates,
                 exclude_low_quality=exclude_low_quality,
+                effective_duplicate_hidden=effective_duplicate_hidden,
+                effective_low_quality_flag=effective_low_quality_flag,
+                effective_sponsor_visible=effective_sponsor_visible,
             )
         )
 
@@ -60,11 +72,10 @@ class RetrievalService:
             .outerjoin(AssetMetadata, AssetMetadata.asset_id == Asset.id)
             .options(selectinload(Asset.asset_metadata))
             .where(*filters)
+            .order_by(*self._build_asset_sort(sort=sort, order=order))
             .offset(offset)
             .limit(limit)
         )
-
-        stmt = stmt.order_by(*self._build_asset_sort(sort=sort, order=order))
 
         result = await self.db.execute(stmt)
         assets = result.scalars().all()
@@ -83,124 +94,152 @@ class RetrievalService:
         event_id: UUID,
         payload: SearchRequest,
     ) -> SearchResponse:
-        """Perform simplified hybrid search using metadata fields."""
-        filters = [Asset.event_id == event_id]
-        metadata_filters = []
+        """Perform PRD-aligned hybrid search using CLIP, pgvector, and FTS."""
+        query_text = payload.query.strip()
+        query_vector = get_embedder().embed_text(query_text)
+        query_categories = set(payload.filters.categories or [])
+        query_categories.update(self._infer_query_categories(query_text))
+
+        effective_duplicate_hidden = self._effective_duplicate_hidden_expr()
+        effective_low_quality_flag = self._effective_low_quality_flag_expr()
+
+        base_filters = [Asset.event_id == event_id]
+        base_filters.extend(
+            self._build_search_filters(
+                payload=payload,
+                effective_duplicate_hidden=effective_duplicate_hidden,
+                effective_low_quality_flag=effective_low_quality_flag,
+            )
+        )
+
+        cosine_distance = AssetMetadata.embedding_vector.op("<=>")(query_vector)
+        semantic_similarity_expr = (1.0 - cosine_distance).cast(Float)
+
+        vector_stmt = (
+            select(
+                Asset.id.label("asset_id"),
+                func.coalesce(semantic_similarity_expr, 0.0).label(
+                    "semantic_similarity"
+                ),
+            )
+            .join(Asset.asset_metadata)
+            .where(*base_filters, AssetMetadata.embedding_vector.is_not(None))
+            .order_by(cosine_distance)
+            .limit(VECTOR_CANDIDATE_LIMIT)
+        )
+        vector_result = await self.db.execute(vector_stmt)
+        vector_rows = vector_result.all()
+
+        candidate_map: dict[UUID, dict[str, float]] = {
+            row.asset_id: {
+                "semantic_similarity": max(
+                    0.0, min(1.0, float(row.semantic_similarity))
+                ),
+                "keyword_match": 0.0,
+            }
+            for row in vector_rows
+        }
+
+        candidate_ids = list(candidate_map)
+        if not candidate_ids:
+            return SearchResponse(
+                data=SearchResponseData(
+                    total_count=0,
+                    limit=payload.limit,
+                    offset=payload.offset,
+                    results=[],
+                )
+            )
+
+        ts_query = func.plainto_tsquery("english", query_text)
+        keyword_stmt = select(
+            AssetMetadata.asset_id.label("asset_id"),
+            func.ts_rank(AssetMetadata.fts_vector, ts_query).label("keyword_match"),
+        ).where(
+            AssetMetadata.asset_id.in_(candidate_ids),
+            AssetMetadata.fts_vector.op("@@")(ts_query),
+        )
+        keyword_result = await self.db.execute(keyword_stmt)
+        for row in keyword_result.all():
+            candidate_map[row.asset_id]["keyword_match"] = max(
+                0.0, min(1.0, float(row.keyword_match or 0.0))
+            )
+
+        asset_stmt = (
+            select(Asset)
+            .options(selectinload(Asset.asset_metadata))
+            .where(Asset.id.in_(candidate_ids))
+        )
+        asset_result = await self.db.execute(asset_stmt)
+        assets = asset_result.scalars().all()
+
+        ranked_results: list[tuple[Asset, SearchScore]] = []
+        for asset in assets:
+            metadata = asset.asset_metadata
+            if metadata is None:
+                continue
+
+            candidate = candidate_map.get(asset.id)
+            if candidate is None:
+                continue
+
+            usefulness_score_normalized = max(
+                0.0, min(1.0, float((metadata.usefulness_score or 0) / 100.0))
+            )
+            category_match = (
+                1.0
+                if query_categories and metadata.primary_category in query_categories
+                else 0.0
+            )
+            total = (
+                0.4 * candidate["semantic_similarity"]
+                + 0.3 * candidate["keyword_match"]
+                + 0.2 * usefulness_score_normalized
+                + 0.1 * category_match
+            )
+
+            ranked_results.append(
+                (
+                    asset,
+                    SearchScore(
+                        total=total,
+                        semantic_similarity=candidate["semantic_similarity"],
+                        keyword_match=candidate["keyword_match"],
+                        usefulness_score_normalized=usefulness_score_normalized,
+                        category_match=category_match,
+                    ),
+                )
+            )
 
         if payload.filters.categories:
-            metadata_filters.append(
-                AssetMetadata.primary_category.in_(payload.filters.categories)
-            )
-
-        if payload.filters.min_quality > 0:
-            metadata_filters.append(
-                AssetMetadata.usefulness_score >= payload.filters.min_quality
-            )
-
-        if payload.filters.exclude_duplicates:
-            metadata_filters.append(
-                or_(
-                    AssetMetadata.duplicate_hidden.is_(False),
-                    AssetMetadata.duplicate_hidden.is_(None),
-                )
-            )
-
-        if payload.filters.exclude_low_quality:
-            metadata_filters.append(
-                or_(
-                    AssetMetadata.low_quality_flag.is_(False),
-                    AssetMetadata.low_quality_flag.is_(None),
-                )
-            )
-
-        query_text = payload.query.strip()
-        ilike_query = f"%{query_text}%"
-
-        semantic_similarity = case(
-            (
-                AssetMetadata.caption.ilike(ilike_query),
-                0.9,
-            ),
-            else_=0.0,
-        )
-
-        keyword_match = case(
-            (
-                or_(
-                    AssetMetadata.caption.ilike(ilike_query),
-                    AssetMetadata.tags_json.cast(
-                        type_=AssetMetadata.tags_json.type
-                    ).is_not(None),
-                ),
-                0.8,
-            ),
-            else_=0.0,
-        )
-
-        usefulness_score_normalized = func.coalesce(
-            AssetMetadata.usefulness_score / 100.0,
-            0.0,
-        )
-
-        category_match = case(
-            (
-                and_(
-                    payload.filters.categories is not None,
-                    AssetMetadata.primary_category.in_(
-                        payload.filters.categories or []
-                    ),
-                ),
-                1.0,
-            ),
-            else_=0.0,
-        )
-
-        total_score = (
-            0.4 * semantic_similarity
-            + 0.3 * keyword_match
-            + 0.2 * usefulness_score_normalized
-            + 0.1 * category_match
-        )
-
-        stmt = (
-            select(
-                Asset,
-                func.coalesce(total_score, 0.0).label("total_score"),
-                func.coalesce(semantic_similarity, 0.0).label("semantic_similarity"),
-                func.coalesce(keyword_match, 0.0).label("keyword_match"),
-                func.coalesce(usefulness_score_normalized, 0.0).label(
-                    "usefulness_score_normalized"
-                ),
-                func.coalesce(category_match, 0.0).label("category_match"),
-            )
-            .outerjoin(AssetMetadata, AssetMetadata.asset_id == Asset.id)
-            .options(selectinload(Asset.asset_metadata))
-            .where(*filters, *metadata_filters)
-        )
-
-        if query_text:
-            stmt = stmt.where(
-                or_(
-                    Asset.filename.ilike(ilike_query),
-                    AssetMetadata.caption.ilike(ilike_query),
-                )
-            )
-
-        count_stmt = select(func.count()).select_from(stmt.subquery())
-        count_result = await self.db.execute(count_stmt)
-        total_count = count_result.scalar_one()
+            ranked_results = [
+                item
+                for item in ranked_results
+                if item[0].asset_metadata is not None
+                and item[0].asset_metadata.primary_category
+                in payload.filters.categories
+            ]
 
         if payload.sort == "date":
-            stmt = stmt.order_by(desc(Asset.uploaded_at))
+            ranked_results.sort(key=lambda item: item[0].uploaded_at, reverse=True)
         elif payload.sort == "quality":
-            stmt = stmt.order_by(desc(AssetMetadata.usefulness_score))
+            ranked_results.sort(
+                key=lambda item: (
+                    item[0].asset_metadata.usefulness_score
+                    if item[0].asset_metadata is not None
+                    else 0
+                ),
+                reverse=True,
+            )
         else:
-            stmt = stmt.order_by(desc(total_score), desc(Asset.uploaded_at))
+            ranked_results.sort(
+                key=lambda item: (item[1].total, item[0].uploaded_at), reverse=True
+            )
 
-        stmt = stmt.offset(payload.offset).limit(payload.limit)
-
-        result = await self.db.execute(stmt)
-        rows = result.all()
+        total_count = len(ranked_results)
+        paginated_results = ranked_results[
+            payload.offset : payload.offset + payload.limit
+        ]
 
         return SearchResponse(
             data=SearchResponseData(
@@ -209,18 +248,10 @@ class RetrievalService:
                 offset=payload.offset,
                 results=[
                     SearchResultItem(
-                        asset=AssetResponse.model_validate(row.Asset),
-                        score=SearchScore(
-                            total=float(row.total_score or 0.0),
-                            semantic_similarity=float(row.semantic_similarity or 0.0),
-                            keyword_match=float(row.keyword_match or 0.0),
-                            usefulness_score_normalized=float(
-                                row.usefulness_score_normalized or 0.0
-                            ),
-                            category_match=float(row.category_match or 0.0),
-                        ),
+                        asset=AssetResponse.model_validate(asset),
+                        score=score,
                     )
-                    for row in rows
+                    for asset, score in paginated_results
                 ],
             )
         )
@@ -230,34 +261,27 @@ class RetrievalService:
         view: str,
         exclude_duplicates: bool,
         exclude_low_quality: bool,
+        effective_duplicate_hidden,
+        effective_low_quality_flag,
+        effective_sponsor_visible,
     ) -> list:
         """Build smart view and exclusion filters."""
         filters: list = []
 
         if exclude_duplicates and view != "duplicates":
-            filters.append(
-                or_(
-                    AssetMetadata.duplicate_hidden.is_(False),
-                    AssetMetadata.duplicate_hidden.is_(None),
-                )
-            )
+            filters.append(effective_duplicate_hidden.is_(False))
 
         if exclude_low_quality and view != "low_quality":
-            filters.append(
-                or_(
-                    AssetMetadata.low_quality_flag.is_(False),
-                    AssetMetadata.low_quality_flag.is_(None),
-                )
-            )
+            filters.append(effective_low_quality_flag.is_(False))
 
         if view in {"stage", "crowd", "team", "performance", "portrait"}:
             filters.append(AssetMetadata.primary_category == view)
         elif view == "sponsor":
-            filters.append(AssetMetadata.sponsor_visible_score >= 0.4)
+            filters.append(effective_sponsor_visible.is_(True))
         elif view == "duplicates":
-            filters.append(AssetMetadata.duplicate_hidden.is_(True))
+            filters.append(effective_duplicate_hidden.is_(True))
         elif view == "low_quality":
-            filters.append(AssetMetadata.low_quality_flag.is_(True))
+            filters.append(effective_low_quality_flag.is_(True))
 
         return filters
 
@@ -270,5 +294,87 @@ class RetrievalService:
         else:
             column = Asset.uploaded_at
 
-        direction = desc if descending else lambda value: value.asc()
-        return (direction(column), desc(Asset.uploaded_at))
+        primary_order = desc(column) if descending else column.asc()
+        secondary_order = (
+            desc(Asset.uploaded_at) if descending else Asset.uploaded_at.asc()
+        )
+        return (primary_order, secondary_order)
+
+    def _build_search_filters(
+        self,
+        payload: SearchRequest,
+        effective_duplicate_hidden,
+        effective_low_quality_flag,
+    ) -> list:
+        """Build deterministic SQL filters used before hybrid scoring."""
+        filters: list = []
+
+        if payload.filters.min_quality > 0:
+            filters.append(
+                AssetMetadata.usefulness_score >= payload.filters.min_quality
+            )
+
+        if payload.filters.exclude_duplicates:
+            filters.append(effective_duplicate_hidden.is_(False))
+
+        if payload.filters.exclude_low_quality:
+            filters.append(effective_low_quality_flag.is_(False))
+
+        return filters
+
+    def _effective_duplicate_hidden_expr(self):
+        """Return duplicate visibility with override awareness."""
+        return func.coalesce(AssetMetadata.duplicate_hidden, False)
+
+    def _effective_sponsor_visible_expr(self):
+        """Return sponsor visibility boolean with override awareness."""
+        override_value = self._latest_override_value_expr(
+            OverrideType.SPONSOR_VISIBLE_OVERRIDE
+        )
+        return case(
+            (override_value == "true", True),
+            (override_value == "false", False),
+            else_=func.coalesce(
+                AssetMetadata.sponsor_visible_score >= SPONSOR_THRESHOLD, False
+            ),
+        )
+
+    def _effective_low_quality_flag_expr(self):
+        """Return low-quality flag with useful override awareness."""
+        override_value = self._latest_override_value_expr(OverrideType.USEFUL_OVERRIDE)
+        return case(
+            (override_value == "true", False),
+            (override_value == "false", True),
+            else_=func.coalesce(AssetMetadata.low_quality_flag, False),
+        )
+
+    def _latest_override_value_expr(self, override_type: OverrideType):
+        """Return latest override value subquery for a given asset and type."""
+        return (
+            select(Override.value)
+            .where(
+                Override.asset_id == Asset.id,
+                Override.type == override_type,
+            )
+            .order_by(Override.created_at.desc())
+            .limit(1)
+            .scalar_subquery()
+        )
+
+    def _infer_query_categories(self, query: str) -> set[str]:
+        """Infer likely categories from the free-text search query."""
+        query_lower = query.lower()
+        inferred: set[str] = set()
+        category_keywords = {
+            "stage": {"stage", "concert", "band", "dj"},
+            "crowd": {"crowd", "audience", "fans"},
+            "team": {"team", "staff", "crew", "group"},
+            "performance": {"performance", "performer", "show", "dance"},
+            "portrait": {"portrait", "close-up", "headshot", "person"},
+        }
+
+        for category, keywords in category_keywords.items():
+            if any(keyword in query_lower for keyword in keywords):
+                inferred.add(category)
+
+        return inferred

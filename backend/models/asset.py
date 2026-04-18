@@ -20,7 +20,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backend.database import Base
-from backend.storage import get_storage
 import enum
 
 
@@ -126,10 +125,14 @@ class Asset(Base):
 
     @property
     def url(self) -> str:
+        from backend.storage import get_storage
+
         return get_storage().get_url(self.storage_key)
 
     @property
     def thumbnail_url(self) -> str:
+        from backend.storage import get_storage
+
         return get_storage().get_url(get_storage().get_thumbnail_key(self.storage_key))
 
     def __repr__(self) -> str:

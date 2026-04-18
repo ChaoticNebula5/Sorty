@@ -3,9 +3,9 @@ Configuration management for Sorty backend.
 All settings are loaded from environment variables via pydantic-settings.
 """
 
-from typing import Literal
+from typing import Annotated, Literal
 from pydantic import Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -99,7 +99,7 @@ class Settings(BaseSettings):
     )
 
     # CORS
-    cors_origins: list[str] = Field(
+    cors_origins: Annotated[list[str], NoDecode] = Field(
         default=["http://localhost:3000"], description="Allowed CORS origins"
     )
 

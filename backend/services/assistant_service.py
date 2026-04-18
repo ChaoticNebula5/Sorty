@@ -8,7 +8,6 @@ from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from backend.models import (
     AssistantAction,
@@ -16,6 +15,8 @@ from backend.models import (
     Asset,
     AssetMetadata,
     Collection,
+    CollectionAsset,
+    Event,
 )
 from backend.schemas.assistant import (
     AssistantActionRequest,
@@ -35,16 +36,9 @@ class AssistantService:
         self, event_id: UUID, payload: AssistantActionRequest
     ) -> AssistantActionResponse | None:
         """Execute a supported assistant action for an event."""
-        if payload.action_type == "create_instagram_pack":
-            result = await self._create_instagram_pack(event_id, payload)
-        elif payload.action_type == "find_sponsor_visible_media":
-            result = await self._find_sponsor_visible_media(event_id, payload)
-        elif payload.action_type == "show_best_stage_shots":
-            result = await self._show_best_stage_shots(event_id, payload)
-        elif payload.action_type == "build_collection_from_filters":
-            result = await self._build_collection_from_filters(event_id, payload)
-        else:
-            raise ValueError("Unsupported assistant action")
+        result = await self._dispatch_action(event_id, payload)
+        if result is None:
+            return None
 
         run = AssistantRun(
             event_id=event_id,
@@ -64,141 +58,127 @@ class AssistantService:
             )
         )
 
+    async def _dispatch_action(
+        self, event_id: UUID, payload: AssistantActionRequest
+    ) -> dict | None:
+        """Dispatch assistant action to the correct handler."""
+        event_exists = await self._event_exists(event_id)
+        if not event_exists:
+            return None
+
+        if payload.action_type == "create_instagram_pack":
+            return await self._create_instagram_pack(event_id, payload)
+        if payload.action_type == "find_sponsor_visible_media":
+            return await self._find_sponsor_visible_media(event_id, payload)
+        if payload.action_type == "show_best_stage_shots":
+            return await self._show_best_stage_shots(event_id, payload)
+        if payload.action_type == "build_collection_from_filters":
+            return await self._build_collection_from_filters(event_id, payload)
+
+        raise ValueError("Unsupported assistant action")
+
+    async def _event_exists(self, event_id: UUID) -> bool:
+        """Check whether an event exists."""
+        result = await self.db.execute(select(Event.id).where(Event.id == event_id))
+        return result.scalar_one_or_none() is not None
+
     async def _create_instagram_pack(
         self, event_id: UUID, payload: AssistantActionRequest
     ) -> dict:
         """Create a collection of high-quality curated assets."""
-        count = payload.params.count or 20
+        count = min(payload.params.count or 20, 20)
         min_quality = payload.params.min_quality or 75
         categories = payload.params.prefer_categories or ["portrait", "stage"]
 
-        stmt = (
-            select(Asset)
-            .join(Asset.asset_metadata)
-            .options(selectinload(Asset.asset_metadata))
-            .where(
-                Asset.event_id == event_id,
-                AssetMetadata.primary_category.in_(categories),
-                AssetMetadata.usefulness_score >= min_quality,
-                AssetMetadata.duplicate_hidden.is_(False),
-                AssetMetadata.low_quality_flag.is_(False),
-            )
-            .order_by(AssetMetadata.usefulness_score.desc(), Asset.uploaded_at.desc())
-            .limit(count)
+        assets = await self._select_assets(
+            event_id=event_id,
+            count=count,
+            min_quality=min_quality,
+            categories=categories,
+            sponsor_only=False,
+            stage_only=False,
         )
-        result = await self.db.execute(stmt)
-        assets = result.scalars().all()
 
-        collection_name = (
-            f"Instagram Pack - {datetime.now(timezone.utc).date().isoformat()}"
-        )
-        collection = Collection(event_id=event_id, name=collection_name)
-        self.db.add(collection)
-        await self.db.flush()
-
-        for asset in assets:
-            collection.asset_associations.append({"asset_id": asset.id})
-
-        summary = (
-            f"Created pack with {len(assets)} high-quality "
-            f"{', '.join(categories)} shots, excluding duplicates and low-quality images."
+        collection = await self._create_collection_with_assets(
+            event_id=event_id,
+            name=f"Instagram Pack - {datetime.now(timezone.utc).date().isoformat()}",
+            assets=assets,
         )
 
         return {
             "collection_id": collection.id,
             "collection_name": collection.name,
             "asset_count": len(assets),
-            "summary": summary,
+            "summary": (
+                f"Created pack with {len(assets)} high-quality "
+                f"{', '.join(categories)} shots, excluding duplicates and low-quality images."
+            ),
         }
 
     async def _find_sponsor_visible_media(
         self, event_id: UUID, payload: AssistantActionRequest
     ) -> dict:
         """Return summary for sponsor-visible media."""
-        count = payload.params.count or 20
+        count = min(payload.params.count or 20, 100)
 
-        stmt = (
-            select(Asset.id)
-            .join(Asset.asset_metadata)
-            .where(
-                Asset.event_id == event_id,
-                AssetMetadata.sponsor_visible_score >= 0.4,
-                AssetMetadata.duplicate_hidden.is_(False),
-            )
-            .limit(count)
+        assets = await self._select_assets(
+            event_id=event_id,
+            count=count,
+            min_quality=0,
+            categories=None,
+            sponsor_only=True,
+            stage_only=False,
         )
-        result = await self.db.execute(stmt)
-        asset_ids = [row[0] for row in result.all()]
 
         return {
-            "asset_count": len(asset_ids),
-            "summary": f"Found {len(asset_ids)} sponsor-visible assets for review.",
-            "extra": {"asset_ids": asset_ids},
+            "asset_count": len(assets),
+            "summary": f"Found {len(assets)} sponsor-visible assets for review.",
+            "extra": {"asset_ids": [asset.id for asset in assets]},
         }
 
     async def _show_best_stage_shots(
         self, event_id: UUID, payload: AssistantActionRequest
     ) -> dict:
         """Return summary for top stage shots."""
-        count = payload.params.count or 20
+        count = min(payload.params.count or 20, 100)
 
-        stmt = (
-            select(Asset.id)
-            .join(Asset.asset_metadata)
-            .where(
-                Asset.event_id == event_id,
-                AssetMetadata.primary_category == "stage",
-                AssetMetadata.duplicate_hidden.is_(False),
-                AssetMetadata.low_quality_flag.is_(False),
-            )
-            .order_by(AssetMetadata.usefulness_score.desc(), Asset.uploaded_at.desc())
-            .limit(count)
+        assets = await self._select_assets(
+            event_id=event_id,
+            count=count,
+            min_quality=0,
+            categories=None,
+            sponsor_only=False,
+            stage_only=True,
         )
-        result = await self.db.execute(stmt)
-        asset_ids = [row[0] for row in result.all()]
 
         return {
-            "asset_count": len(asset_ids),
-            "summary": f"Selected {len(asset_ids)} strong stage shots.",
-            "extra": {"asset_ids": asset_ids},
+            "asset_count": len(assets),
+            "summary": f"Selected {len(assets)} strong stage shots.",
+            "extra": {"asset_ids": [asset.id for asset in assets]},
         }
 
     async def _build_collection_from_filters(
         self, event_id: UUID, payload: AssistantActionRequest
     ) -> dict:
         """Create a collection from assistant filter preferences."""
-        count = payload.params.count or 20
+        count = min(payload.params.count or 20, 100)
         min_quality = payload.params.min_quality or 0
         categories = payload.params.prefer_categories
 
-        stmt = (
-            select(Asset)
-            .join(Asset.asset_metadata)
-            .options(selectinload(Asset.asset_metadata))
-            .where(
-                Asset.event_id == event_id,
-                AssetMetadata.usefulness_score >= min_quality,
-                AssetMetadata.duplicate_hidden.is_(False),
-            )
-            .order_by(AssetMetadata.usefulness_score.desc(), Asset.uploaded_at.desc())
-            .limit(count)
+        assets = await self._select_assets(
+            event_id=event_id,
+            count=count,
+            min_quality=min_quality,
+            categories=categories,
+            sponsor_only=False,
+            stage_only=False,
         )
 
-        if categories:
-            stmt = stmt.where(AssetMetadata.primary_category.in_(categories))
-
-        result = await self.db.execute(stmt)
-        assets = result.scalars().all()
-
-        collection_name = (
-            f"Assistant Collection - {datetime.now(timezone.utc).date().isoformat()}"
+        collection = await self._create_collection_with_assets(
+            event_id=event_id,
+            name=f"Assistant Collection - {datetime.now(timezone.utc).date().isoformat()}",
+            assets=assets,
         )
-        collection = Collection(event_id=event_id, name=collection_name)
-        self.db.add(collection)
-        await self.db.flush()
-
-        for asset in assets:
-            collection.asset_associations.append({"asset_id": asset.id})
 
         return {
             "collection_id": collection.id,
@@ -206,3 +186,58 @@ class AssistantService:
             "asset_count": len(assets),
             "summary": f"Built collection with {len(assets)} assets from assistant filters.",
         }
+
+    async def _select_assets(
+        self,
+        event_id: UUID,
+        count: int,
+        min_quality: int,
+        categories: list[str] | None,
+        sponsor_only: bool,
+        stage_only: bool,
+    ) -> list[Asset]:
+        """Select curated assets for assistant actions."""
+        stmt = (
+            select(Asset)
+            .join(Asset.asset_metadata)
+            .where(
+                Asset.event_id == event_id,
+                AssetMetadata.duplicate_hidden.is_(False),
+                AssetMetadata.low_quality_flag.is_(False),
+                AssetMetadata.usefulness_score >= min_quality,
+            )
+            .order_by(AssetMetadata.usefulness_score.desc(), Asset.uploaded_at.desc())
+            .limit(count)
+        )
+
+        if categories:
+            stmt = stmt.where(AssetMetadata.primary_category.in_(categories))
+        if sponsor_only:
+            stmt = stmt.where(AssetMetadata.sponsor_visible_score >= 0.4)
+        if stage_only:
+            stmt = stmt.where(AssetMetadata.primary_category == "stage")
+
+        result = await self.db.execute(stmt)
+        return list(result.scalars().all())
+
+    async def _create_collection_with_assets(
+        self,
+        event_id: UUID,
+        name: str,
+        assets: list[Asset],
+    ) -> Collection:
+        """Create a collection and attach asset rows explicitly."""
+        collection = Collection(event_id=event_id, name=name)
+        self.db.add(collection)
+        await self.db.flush()
+
+        for asset in assets:
+            self.db.add(
+                CollectionAsset(
+                    collection_id=collection.id,
+                    asset_id=asset.id,
+                )
+            )
+
+        await self.db.flush()
+        return collection
