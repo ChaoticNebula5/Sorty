@@ -14,6 +14,7 @@ from backend.models.duplicate_cluster import DuplicateCluster, DuplicateClusterM
 from backend.models.collection import Collection, CollectionAsset
 from backend.models.override import Override, OverrideType
 from backend.models.assistant_run import AssistantRun, AssistantAction
+from backend.models.export_job import ExportJob, ExportStatus
 
 # Export all models and enums
 __all__ = [
@@ -34,4 +35,6 @@ __all__ = [
     "JobStatus",
     "OverrideType",
     "AssistantAction",
+    "ExportStatus",
+    "ExportJob"
 ]
