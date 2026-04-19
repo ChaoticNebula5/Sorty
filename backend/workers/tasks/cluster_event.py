@@ -18,9 +18,11 @@ from backend.models import (
     DuplicateClusterMember,
     ProcessingStatus,
 )
+from backend.workers.queues import get_redis_connection
 
 
 SIMILARITY_THRESHOLD = 0.90
+MAX_NEIGHBORS = 20
 
 
 def run(event_id: str) -> None:
@@ -29,23 +31,33 @@ def run(event_id: str) -> None:
 
 
 async def _run(event_id: UUID) -> None:
-    """Cluster assets for an event using embedding cosine similarity."""
-    async with AsyncSessionLocal() as db:
-        assets = await _load_assets_with_embeddings(db, event_id)
-        if len(assets) < 2:
-            return
+    """Cluster assets for an event using pgvector neighbor search."""
+    redis_connection = get_redis_connection()
+    lock_key = f"clustering_lock:{event_id}"
 
-        adjacency = _build_adjacency(assets)
-        components = _connected_components(adjacency)
+    try:
+        async with AsyncSessionLocal() as db:
+            assets = await _load_assets_with_embeddings(db, event_id)
+            await _reset_duplicate_hidden_flags(db, event_id)
 
-        await _replace_clusters(db, event_id, assets, components)
-        await db.commit()
+            if len(assets) < 2:
+                await _delete_existing_clusters(db, event_id)
+                await db.commit()
+                return
+
+            adjacency = await _build_adjacency(db, event_id, assets)
+            components = _connected_components(adjacency)
+
+            await _replace_clusters(db, event_id, assets, components)
+            await db.commit()
+    finally:
+        redis_connection.delete(lock_key)
 
 
 async def _load_assets_with_embeddings(
     db: AsyncSession, event_id: UUID
 ) -> list[tuple[Asset, AssetMetadata]]:
-    """Load assets for an event that have embeddings."""
+    """Load completed assets for an event that have embeddings."""
     stmt = (
         select(Asset, AssetMetadata)
         .join(Asset.asset_metadata)
@@ -56,29 +68,43 @@ async def _load_assets_with_embeddings(
         )
     )
     result = await db.execute(stmt)
-    return [tuple(row) for row in result.all()]
+    return [(row[0], row[1]) for row in result.all()]
 
 
-def _build_adjacency(
+async def _build_adjacency(
+    db: AsyncSession,
+    event_id: UUID,
     assets: list[tuple[Asset, AssetMetadata]],
 ) -> dict[UUID, set[UUID]]:
-    """Build graph adjacency based on cosine similarity threshold."""
+    """Build graph adjacency from pgvector nearest neighbors."""
     adjacency: dict[UUID, set[UUID]] = defaultdict(set)
 
-    for i, (asset_a, metadata_a) in enumerate(assets):
-        vector_a = metadata_a.embedding_vector
-        if vector_a is None:
+    for asset, metadata in assets:
+        vector = metadata.embedding_vector
+        if vector is None:
             continue
 
-        for asset_b, metadata_b in assets[i + 1 :]:
-            vector_b = metadata_b.embedding_vector
-            if vector_b is None:
-                continue
+        cosine_distance = AssetMetadata.embedding_vector.op("<=>")(vector)
+        neighbor_stmt = (
+            select(Asset.id.label("asset_id"), cosine_distance.label("distance"))
+            .join(Asset.asset_metadata)
+            .where(
+                Asset.event_id == event_id,
+                Asset.processing_status == ProcessingStatus.COMPLETED,
+                Asset.id != asset.id,
+                AssetMetadata.embedding_vector.is_not(None),
+            )
+            .order_by(cosine_distance)
+            .limit(MAX_NEIGHBORS)
+        )
+        neighbor_result = await db.execute(neighbor_stmt)
 
-            similarity = _cosine_similarity(vector_a, vector_b)
+        for row in neighbor_result.all():
+            distance = float(row.distance)
+            similarity = 1.0 - distance
             if similarity >= SIMILARITY_THRESHOLD:
-                adjacency[asset_a.id].add(asset_b.id)
-                adjacency[asset_b.id].add(asset_a.id)
+                adjacency[asset.id].add(row.asset_id)
+                adjacency[row.asset_id].add(asset.id)
 
     return adjacency
 
@@ -118,25 +144,7 @@ async def _replace_clusters(
 ) -> None:
     """Replace existing clusters for event with newly computed ones."""
     asset_map = {asset.id: (asset, metadata) for asset, metadata in assets}
-
-    existing_stmt = select(DuplicateCluster).where(
-        DuplicateCluster.event_id == event_id
-    )
-    existing_result = await db.execute(existing_stmt)
-    existing_clusters = existing_result.scalars().all()
-
-    for cluster in existing_clusters:
-        await db.delete(cluster)
-
-    await db.execute(
-        update(AssetMetadata)
-        .where(
-            AssetMetadata.asset_id.in_(
-                select(Asset.id).where(Asset.event_id == event_id)
-            )
-        )
-        .values(duplicate_hidden=False)
-    )
+    await _delete_existing_clusters(db, event_id)
 
     for component in components:
         ranked_assets = sorted(
@@ -148,7 +156,8 @@ async def _replace_clusters(
             reverse=True,
         )
 
-        representative_asset = ranked_assets[0][0]
+        representative_asset, representative_metadata = ranked_assets[0]
+        representative_vector = representative_metadata.embedding_vector or []
 
         cluster = DuplicateCluster(
             event_id=event_id,
@@ -158,26 +167,47 @@ async def _replace_clusters(
         await db.flush()
 
         for rank, (asset, metadata) in enumerate(ranked_assets, start=1):
-            representative_vector = ranked_assets[0][1].embedding_vector
-            metadata_vector = metadata.embedding_vector
+            metadata_vector = metadata.embedding_vector or []
             similarity = (
                 1.0
                 if asset.id == representative_asset.id
-                else _cosine_similarity(
-                    metadata_vector or [],
-                    representative_vector or [],
+                else _cosine_similarity(metadata_vector, representative_vector)
+            )
+
+            db.add(
+                DuplicateClusterMember(
+                    cluster_id=cluster.id,
+                    asset_id=asset.id,
+                    similarity_score=similarity,
+                    rank=rank,
                 )
             )
-
-            member = DuplicateClusterMember(
-                cluster_id=cluster.id,
-                asset_id=asset.id,
-                similarity_score=similarity,
-                rank=rank,
-            )
-            db.add(member)
-
             metadata.duplicate_hidden = rank > 1
+
+
+async def _delete_existing_clusters(db: AsyncSession, event_id: UUID) -> None:
+    """Delete all existing duplicate clusters for an event."""
+    existing_stmt = select(DuplicateCluster).where(
+        DuplicateCluster.event_id == event_id
+    )
+    existing_result = await db.execute(existing_stmt)
+    existing_clusters = existing_result.scalars().all()
+
+    for cluster in existing_clusters:
+        await db.delete(cluster)
+
+
+async def _reset_duplicate_hidden_flags(db: AsyncSession, event_id: UUID) -> None:
+    """Reset duplicate hidden flags before rebuilding clusters."""
+    await db.execute(
+        update(AssetMetadata)
+        .where(
+            AssetMetadata.asset_id.in_(
+                select(Asset.id).where(Asset.event_id == event_id)
+            )
+        )
+        .values(duplicate_hidden=False)
+    )
 
 
 def _cosine_similarity(vector_a: list[float], vector_b: list[float]) -> float:
