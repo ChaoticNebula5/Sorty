@@ -62,8 +62,12 @@ class Settings(BaseSettings):
 
     # Embeddings - CLIP
     clip_model_path: str = Field(
-        default="./models/clip-vit-base-patch32",
-        description="Path to CLIP model weights (local cache)",
+        default="openai/clip-vit-base-patch32",
+        description="CLIP model id or local model path",
+    )
+    clip_cache_dir: str = Field(
+        default="./backend/models_cache",
+        description="Directory used to cache CLIP model downloads",
     )
 
     # Processing

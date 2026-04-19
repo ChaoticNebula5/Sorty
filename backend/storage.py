@@ -22,6 +22,10 @@ class StorageBackend:
         """Store thumbnail and return storage key (always .jpg)."""
         raise NotImplementedError
 
+    async def put_bytes(self, file_bytes: bytes, storage_key: str) -> str:
+        """Store arbitrary bytes at a specific storage key."""
+        raise NotImplementedError
+
     async def get(self, storage_key: str) -> bytes:
         """Retrieve file by storage key."""
         raise NotImplementedError
@@ -62,6 +66,16 @@ class LocalStorage(StorageBackend):
         """Store thumbnail locally as thumb_{hash}.jpg."""
         storage_key = f"thumb_{file_hash}.jpg"
         file_path = self.base_path / storage_key
+
+        async with aiofiles.open(file_path, "wb") as f:
+            await f.write(file_bytes)
+
+        return storage_key
+
+    async def put_bytes(self, file_bytes: bytes, storage_key: str) -> str:
+        """Store arbitrary bytes locally with an explicit storage key."""
+        file_path = self.base_path / storage_key
+        file_path.parent.mkdir(parents=True, exist_ok=True)
 
         async with aiofiles.open(file_path, "wb") as f:
             await f.write(file_bytes)
@@ -140,6 +154,16 @@ class S3Storage(StorageBackend):
             return storage_key
         except ClientError as e:
             raise RuntimeError(f"S3 thumbnail upload failed: {e}")
+
+    async def put_bytes(self, file_bytes: bytes, storage_key: str) -> str:
+        """Upload arbitrary bytes to S3 at an explicit storage key."""
+        try:
+            self.s3_client.put_object(
+                Bucket=self.bucket, Key=storage_key, Body=file_bytes
+            )
+            return storage_key
+        except ClientError as e:
+            raise RuntimeError(f"S3 upload failed: {e}")
 
     async def get(self, storage_key: str) -> bytes:
         """Download file from S3."""

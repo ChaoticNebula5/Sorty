@@ -32,6 +32,7 @@ from backend.schemas.event import (
     EventWithStats,
 )
 from backend.schemas.export import ExportResponse, ExportStatusResponse
+from backend.schemas.override import OverrideCreate, OverrideResponse
 from backend.schemas.search import SearchRequest, SearchResponse
 
 __all__ = [
@@ -58,6 +59,8 @@ __all__ = [
     "EventWithStats",
     "ExportResponse",
     "ExportStatusResponse",
+    "OverrideCreate",
+    "OverrideResponse",
     "SearchRequest",
     "SearchResponse",
 ]

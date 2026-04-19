@@ -6,6 +6,7 @@ from backend.routers import (
     collections,
     events,
     export,
+    overrides,
     search,
     upload,
 )
@@ -16,6 +17,7 @@ __all__ = [
     "collections",
     "events",
     "export",
+    "overrides",
     "search",
     "upload",
 ]

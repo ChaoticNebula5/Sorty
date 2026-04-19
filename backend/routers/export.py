@@ -5,14 +5,16 @@ Handles export creation and status polling.
 
 from typing import Any
 from uuid import UUID
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db
 from backend.models import ExportJob, ExportStatus
 from backend.services.export_service import ExportService
+from backend.storage import get_storage
 
 
 router = APIRouter(tags=["export"])
@@ -42,6 +44,11 @@ async def create_export(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail={"code": "EXPORT_TOO_LARGE", "message": message},
         ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "EXPORT_QUEUE_UNAVAILABLE", "message": str(exc)},
+        ) from exc
 
     return {"data": result.data.model_dump(), "error": None}
 
@@ -67,7 +74,7 @@ async def get_export_status(
 async def download_export(
     export_id: UUID,
     db: AsyncSession = Depends(get_db),
-) -> FileResponse:
+) -> Response:
     """Download a ready export archive."""
     export_job = await db.get(ExportJob, export_id)
     if export_job is None:
@@ -82,8 +89,26 @@ async def download_export(
             detail={"code": "EXPORT_NOT_READY", "message": "Export is not ready"},
         )
 
-    return FileResponse(
-        path=export_job.storage_key,
+    if export_job.expires_at is not None and export_job.expires_at <= datetime.now(
+        timezone.utc
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_410_GONE,
+            detail={"code": "EXPORT_EXPIRED", "message": "Export link has expired"},
+        )
+
+    try:
+        export_bytes = await get_storage().get(export_job.storage_key)
+    except FileNotFoundError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "EXPORT_FILE_MISSING", "message": "Export file not found"},
+        ) from exc
+
+    return Response(
+        content=export_bytes,
         media_type="application/zip",
-        filename=f"{export_id}.zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{export_id}.zip"',
+        },
     )

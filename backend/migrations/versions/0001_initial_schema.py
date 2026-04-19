@@ -18,11 +18,26 @@ depends_on = None
 
 
 processing_status_enum = sa.Enum(
-    "pending", "processing", "completed", "failed", name="processing_status"
+    "pending",
+    "processing",
+    "completed",
+    "failed",
+    name="processing_status",
+    create_type=False,
 )
-job_type_enum = sa.Enum("metadata_enrichment", "duplicate_clustering", name="job_type")
+job_type_enum = sa.Enum(
+    "metadata_enrichment",
+    "duplicate_clustering",
+    name="job_type",
+    create_type=False,
+)
 job_status_enum = sa.Enum(
-    "queued", "processing", "completed", "failed", name="job_status"
+    "queued",
+    "processing",
+    "completed",
+    "failed",
+    name="job_status",
+    create_type=False,
 )
 override_type_enum = sa.Enum(
     "hide",
@@ -32,6 +47,7 @@ override_type_enum = sa.Enum(
     "sponsor_visible_override",
     "useful_override",
     name="override_type",
+    create_type=False,
 )
 assistant_action_enum = sa.Enum(
     "create_instagram_pack",
@@ -39,20 +55,18 @@ assistant_action_enum = sa.Enum(
     "show_best_stage_shots",
     "build_collection_from_filters",
     name="assistant_action",
+    create_type=False,
 )
-export_status_enum = sa.Enum("generating", "ready", "failed", name="export_status")
+export_status_enum = sa.Enum(
+    "generating", "ready", "failed", name="export_status", create_type=False
+)
 
 
 def upgrade() -> None:
     op.execute('CREATE EXTENSION IF NOT EXISTS "pgcrypto"')
     op.execute('CREATE EXTENSION IF NOT EXISTS "vector"')
 
-    processing_status_enum.create(op.get_bind(), checkfirst=True)
-    job_type_enum.create(op.get_bind(), checkfirst=True)
-    job_status_enum.create(op.get_bind(), checkfirst=True)
-    override_type_enum.create(op.get_bind(), checkfirst=True)
-    assistant_action_enum.create(op.get_bind(), checkfirst=True)
-    export_status_enum.create(op.get_bind(), checkfirst=True)
+    # Enum types are created by table DDL below.
 
     op.create_table(
         "events",

@@ -3,14 +3,21 @@ Processing service layer.
 Handles asset reprocessing and manual event clustering job enqueueing.
 """
 
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from redis import Redis
 from rq import Queue
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.config import settings
-from backend.models import Asset, Event, JobStatus, JobType, ProcessingJob
+from backend.models import (
+    Asset,
+    Event,
+    JobStatus,
+    JobType,
+    ProcessingJob,
+    ProcessingStatus,
+)
 from backend.schemas.asset import (
     ClusterResponse,
     ClusterResponseData,
@@ -34,7 +41,7 @@ class ProcessingService:
         if asset is None:
             return None
 
-        asset.processing_status = "pending"
+        asset.processing_status = ProcessingStatus.PENDING
         asset.error_message = None
 
         job = ProcessingJob(
@@ -47,11 +54,19 @@ class ProcessingService:
         await self.db.commit()
         await self.db.refresh(job)
 
-        self.enrichment_queue.enqueue(
-            "backend.workers.tasks.enrich_asset.run",
-            asset_id=str(asset.id),
-            job_id=str(job.id),
-        )
+        try:
+            self.enrichment_queue.enqueue(
+                "backend.workers.tasks.enrich_asset.run",
+                str(asset.id),
+                str(job.id),
+            )
+        except Exception as exc:
+            job.status = JobStatus.FAILED
+            job.error_message = f"Enrichment enqueue failed: {exc}"
+            asset.processing_status = ProcessingStatus.FAILED
+            asset.error_message = f"Enrichment enqueue failed: {exc}"
+            await self.db.commit()
+            raise RuntimeError("Reprocess enqueue failed") from exc
 
         return ReprocessResponse(
             data=ReprocessResponseData(
@@ -67,14 +82,20 @@ class ProcessingService:
             return None
 
         lock_key = f"clustering_lock:{event_id}"
-        lock_acquired = self.redis.set(lock_key, b"1", nx=True, ex=600)
+        lock_token = str(uuid4())
+        lock_acquired = self.redis.set(lock_key, lock_token, nx=True, ex=600)
 
         if not lock_acquired:
             return ClusterResponse(data=ClusterResponseData(status="already_running"))
 
-        self.clustering_queue.enqueue(
-            "backend.workers.tasks.cluster_event.run",
-            event_id=str(event_id),
-        )
+        try:
+            self.clustering_queue.enqueue(
+                "backend.workers.tasks.cluster_event.run",
+                str(event_id),
+                lock_token,
+            )
+        except Exception as exc:
+            self.redis.delete(lock_key)
+            raise RuntimeError("Clustering enqueue failed") from exc
 
         return ClusterResponse(data=ClusterResponseData(status="queued"))

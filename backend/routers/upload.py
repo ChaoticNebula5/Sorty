@@ -39,5 +39,10 @@ async def upload_assets(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"code": "UPLOAD_INVALID", "message": message},
         ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "UPLOAD_QUEUE_UNAVAILABLE", "message": str(exc)},
+        ) from exc
 
     return {"data": result, "error": None}

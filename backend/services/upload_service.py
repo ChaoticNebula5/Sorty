@@ -16,7 +16,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.config import settings
-from backend.models import Asset, Event, JobType, ProcessingJob
+from backend.models import (
+    Asset,
+    Event,
+    JobStatus,
+    JobType,
+    ProcessingJob,
+    ProcessingStatus,
+)
 from backend.storage import get_storage
 
 
@@ -125,11 +132,22 @@ class UploadService:
         await self.db.commit()
 
         for asset_id, job_id in jobs_to_enqueue:
-            self.enrichment_queue.enqueue(
-                "backend.workers.tasks.enrich_asset.run",
-                asset_id=asset_id,
-                job_id=job_id,
-            )
+            try:
+                self.enrichment_queue.enqueue(
+                    "backend.workers.tasks.enrich_asset.run",
+                    asset_id,
+                    job_id,
+                )
+            except Exception as exc:
+                asset = await self.db.get(Asset, UUID(asset_id))
+                job = await self.db.get(ProcessingJob, UUID(job_id))
+                if asset is not None:
+                    asset.processing_status = ProcessingStatus.FAILED
+                    asset.error_message = f"Enrichment enqueue failed: {exc}"
+                if job is not None:
+                    job.status = JobStatus.FAILED
+                    job.error_message = f"Enrichment enqueue failed: {exc}"
+                await self.db.commit()
 
         return {
             "uploaded": uploaded_count,

@@ -12,6 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.config import settings
 from backend.models import Asset, Collection, CollectionAsset, ExportJob, ExportStatus
+from backend.services.effective_asset_state import (
+    effective_hidden_expr,
+    effective_low_quality_flag_expr,
+)
 from backend.schemas.export import (
     ExportResponse,
     ExportResponseData,
@@ -34,11 +38,18 @@ class ExportService:
         if collection is None:
             raise ValueError("Collection not found")
 
+        effective_hidden = effective_hidden_expr()
+        effective_low_quality = effective_low_quality_flag_expr()
         size_stmt = (
             select(func.coalesce(func.sum(Asset.file_size), 0), func.count(Asset.id))
             .select_from(CollectionAsset)
             .join(Asset, Asset.id == CollectionAsset.asset_id)
-            .where(CollectionAsset.collection_id == collection_id)
+            .join(Asset.asset_metadata)
+            .where(
+                CollectionAsset.collection_id == collection_id,
+                effective_hidden.is_(False),
+                effective_low_quality.is_(False),
+            )
         )
         size_result = await self.db.execute(size_stmt)
         estimated_size_bytes, asset_count = size_result.one()
@@ -53,10 +64,16 @@ class ExportService:
         await self.db.commit()
         await self.db.refresh(export_job)
 
-        self.export_queue.enqueue(
-            "backend.workers.tasks.generate_export.run",
-            export_id=str(export_job.id),
-        )
+        try:
+            self.export_queue.enqueue(
+                "backend.workers.tasks.generate_export.run",
+                str(export_job.id),
+            )
+        except Exception as exc:
+            export_job.status = ExportStatus.FAILED
+            export_job.error_message = f"Export enqueue failed: {exc}"
+            await self.db.commit()
+            raise RuntimeError("Export enqueue failed") from exc
 
         return ExportResponse(
             data=ExportResponseData(

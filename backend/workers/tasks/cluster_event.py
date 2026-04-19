@@ -25,12 +25,12 @@ SIMILARITY_THRESHOLD = 0.90
 MAX_NEIGHBORS = 20
 
 
-def run(event_id: str) -> None:
+def run(event_id: str, lock_token: str) -> None:
     """RQ entrypoint for clustering an event."""
-    asyncio.run(_run(UUID(event_id)))
+    asyncio.run(_run(UUID(event_id), lock_token))
 
 
-async def _run(event_id: UUID) -> None:
+async def _run(event_id: UUID, lock_token: str) -> None:
     """Cluster assets for an event using pgvector neighbor search."""
     redis_connection = get_redis_connection()
     lock_key = f"clustering_lock:{event_id}"
@@ -51,7 +51,17 @@ async def _run(event_id: UUID) -> None:
             await _replace_clusters(db, event_id, assets, components)
             await db.commit()
     finally:
-        redis_connection.delete(lock_key)
+        redis_connection.eval(
+            """
+            if redis.call('get', KEYS[1]) == ARGV[1] then
+                return redis.call('del', KEYS[1])
+            end
+            return 0
+            """,
+            1,
+            lock_key,
+            lock_token,
+        )
 
 
 async def _load_assets_with_embeddings(

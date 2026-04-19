@@ -4,9 +4,10 @@ Handles bounded assistant actions for collections and curated retrieval.
 """
 
 from datetime import datetime, timezone
+import uuid
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import case, desc, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.models import (
@@ -17,6 +18,13 @@ from backend.models import (
     Collection,
     CollectionAsset,
     Event,
+)
+from backend.services.effective_asset_state import (
+    effective_duplicate_hidden_expr,
+    effective_hidden_expr,
+    effective_low_quality_flag_expr,
+    effective_pinned_expr,
+    effective_sponsor_visible_expr,
 )
 from backend.schemas.assistant import (
     AssistantActionRequest,
@@ -197,23 +205,34 @@ class AssistantService:
         stage_only: bool,
     ) -> list[Asset]:
         """Select curated assets for assistant actions."""
+        effective_hidden = effective_hidden_expr()
+        effective_duplicate_hidden = effective_duplicate_hidden_expr()
+        effective_low_quality = effective_low_quality_flag_expr()
+        effective_sponsor_visible = effective_sponsor_visible_expr()
+        effective_pinned = effective_pinned_expr()
+
         stmt = (
             select(Asset)
             .join(Asset.asset_metadata)
             .where(
                 Asset.event_id == event_id,
-                AssetMetadata.duplicate_hidden.is_(False),
-                AssetMetadata.low_quality_flag.is_(False),
+                effective_hidden.is_(False),
+                effective_duplicate_hidden.is_(False),
+                effective_low_quality.is_(False),
                 AssetMetadata.usefulness_score >= min_quality,
             )
-            .order_by(AssetMetadata.usefulness_score.desc(), Asset.uploaded_at.desc())
+            .order_by(
+                desc(effective_pinned),
+                AssetMetadata.usefulness_score.desc(),
+                Asset.uploaded_at.desc(),
+            )
             .limit(count)
         )
 
         if categories:
             stmt = stmt.where(AssetMetadata.primary_category.in_(categories))
         if sponsor_only:
-            stmt = stmt.where(AssetMetadata.sponsor_visible_score >= 0.4)
+            stmt = stmt.where(effective_sponsor_visible.is_(True))
         if stage_only:
             stmt = stmt.where(AssetMetadata.primary_category == "stage")
 
@@ -227,7 +246,10 @@ class AssistantService:
         assets: list[Asset],
     ) -> Collection:
         """Create a collection and attach asset rows explicitly."""
-        collection = Collection(event_id=event_id, name=name)
+        collection = Collection(
+            event_id=event_id,
+            name=name or f"Assistant Collection {uuid.uuid4().hex[:8]}",
+        )
         self.db.add(collection)
         await self.db.flush()
 

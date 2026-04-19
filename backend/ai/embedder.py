@@ -4,6 +4,7 @@ Generates 512-dim normalized embeddings for images and text.
 """
 
 from io import BytesIO
+from pathlib import Path
 
 import torch
 from PIL import Image
@@ -18,10 +19,27 @@ class ClipEmbedder:
     def __init__(self) -> None:
         self.device = "cuda" if torch.cuda.is_available() else "cpu"
         self.model_name = settings.clip_model_path
-        self.processor = CLIPProcessor.from_pretrained(self.model_name)
-        self.model = CLIPModel.from_pretrained(self.model_name)
+        self.cache_dir = settings.clip_cache_dir
+
+        model_source = self._resolve_model_source(self.model_name)
+        self.processor = CLIPProcessor.from_pretrained(
+            model_source,
+            cache_dir=self.cache_dir,
+        )
+        self.model = CLIPModel.from_pretrained(
+            model_source,
+            cache_dir=self.cache_dir,
+        )
         self.model.to(self.device)
         self.model.eval()
+
+    @staticmethod
+    def _resolve_model_source(model_name: str) -> str:
+        """Resolve configured model path or Hugging Face model id."""
+        model_path = Path(model_name)
+        if model_path.exists():
+            return str(model_path)
+        return model_name
 
     @torch.inference_mode()
     def embed_image_bytes(self, image_bytes: bytes) -> list[float]:

@@ -5,14 +5,21 @@ Handles asset listing, smart views, and PRD-aligned hybrid search.
 
 from uuid import UUID
 
-import json
-
 from sqlalchemy import Float, case, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.ai.embedder import get_embedder
-from backend.models import Asset, AssetMetadata, Override, OverrideType
+from backend.models import Asset, AssetMetadata
+from backend.services.effective_asset_state import (
+    asset_response_with_overrides,
+    effective_duplicate_hidden_expr,
+    effective_hidden_expr,
+    effective_low_quality_flag_expr,
+    effective_pinned_expr,
+    effective_sponsor_visible_expr,
+    is_pinned_asset,
+)
 from backend.schemas.asset import AssetListData, AssetListResponse, AssetResponse
 from backend.schemas.search import (
     SearchRequest,
@@ -22,9 +29,7 @@ from backend.schemas.search import (
     SearchScore,
 )
 
-
 VECTOR_CANDIDATE_LIMIT = 200
-SPONSOR_THRESHOLD = 0.40
 
 
 class RetrievalService:
@@ -45,11 +50,11 @@ class RetrievalService:
         exclude_low_quality: bool = False,
     ) -> AssetListResponse:
         """List event assets with smart view filters."""
-        effective_duplicate_hidden = self._effective_duplicate_hidden_expr()
-        effective_low_quality_flag = self._effective_low_quality_flag_expr()
-        effective_sponsor_visible = self._effective_sponsor_visible_expr()
-        effective_hidden = self._effective_hidden_expr()
-        effective_pinned = self._effective_pinned_expr()
+        effective_duplicate_hidden = effective_duplicate_hidden_expr()
+        effective_low_quality_flag = effective_low_quality_flag_expr()
+        effective_sponsor_visible = effective_sponsor_visible_expr()
+        effective_hidden = effective_hidden_expr()
+        effective_pinned = effective_pinned_expr()
 
         filters = [Asset.event_id == event_id]
         filters.extend(
@@ -92,7 +97,7 @@ class RetrievalService:
                 total_count=total_count,
                 limit=limit,
                 offset=offset,
-                assets=[self._asset_response_with_overrides(asset) for asset in assets],
+                assets=[asset_response_with_overrides(asset) for asset in assets],
             )
         )
 
@@ -107,10 +112,9 @@ class RetrievalService:
         query_categories = set(payload.filters.categories or [])
         query_categories.update(self._infer_query_categories(query_text))
 
-        effective_duplicate_hidden = self._effective_duplicate_hidden_expr()
-        effective_low_quality_flag = self._effective_low_quality_flag_expr()
-        effective_hidden = self._effective_hidden_expr()
-        effective_pinned = self._effective_pinned_expr()
+        effective_duplicate_hidden = effective_duplicate_hidden_expr()
+        effective_low_quality_flag = effective_low_quality_flag_expr()
+        effective_hidden = effective_hidden_expr()
 
         base_filters = [Asset.event_id == event_id]
         base_filters.extend(
@@ -233,7 +237,7 @@ class RetrievalService:
         if payload.sort == "date":
             ranked_results.sort(
                 key=lambda item: (
-                    self._is_pinned_asset(item[0]),
+                    is_pinned_asset(item[0]),
                     item[0].uploaded_at,
                 ),
                 reverse=True,
@@ -241,7 +245,7 @@ class RetrievalService:
         elif payload.sort == "quality":
             ranked_results.sort(
                 key=lambda item: (
-                    self._is_pinned_asset(item[0]),
+                    is_pinned_asset(item[0]),
                     item[0].asset_metadata.usefulness_score
                     if item[0].asset_metadata is not None
                     else 0,
@@ -251,7 +255,7 @@ class RetrievalService:
         else:
             ranked_results.sort(
                 key=lambda item: (
-                    self._is_pinned_asset(item[0]),
+                    is_pinned_asset(item[0]),
                     item[1].total,
                     item[0].uploaded_at,
                 ),
@@ -270,7 +274,7 @@ class RetrievalService:
                 offset=payload.offset,
                 results=[
                     SearchResultItem(
-                        asset=self._asset_response_with_overrides(asset),
+                        asset=asset_response_with_overrides(asset),
                         score=score,
                     )
                     for asset, score in paginated_results
@@ -350,63 +354,6 @@ class RetrievalService:
 
         return filters
 
-    def _effective_duplicate_hidden_expr(self):
-        """Return duplicate visibility with override awareness."""
-        return func.coalesce(AssetMetadata.duplicate_hidden, False)
-
-    def _effective_hidden_expr(self):
-        """Return manual hide visibility boolean."""
-        override_value = self._latest_override_value_expr(OverrideType.HIDE)
-        return case(
-            (override_value == "true", True),
-            (override_value == "false", False),
-            else_=False,
-        )
-
-    def _effective_pinned_expr(self):
-        """Return pinned boolean for ordering."""
-        override_value = self._latest_override_value_expr(OverrideType.PIN)
-        return case(
-            (override_value == "true", True),
-            (override_value == "false", False),
-            else_=False,
-        )
-
-    def _effective_sponsor_visible_expr(self):
-        """Return sponsor visibility boolean with override awareness."""
-        override_value = self._latest_override_value_expr(
-            OverrideType.SPONSOR_VISIBLE_OVERRIDE
-        )
-        return case(
-            (override_value == "true", True),
-            (override_value == "false", False),
-            else_=func.coalesce(
-                AssetMetadata.sponsor_visible_score >= SPONSOR_THRESHOLD, False
-            ),
-        )
-
-    def _effective_low_quality_flag_expr(self):
-        """Return low-quality flag with useful override awareness."""
-        override_value = self._latest_override_value_expr(OverrideType.USEFUL_OVERRIDE)
-        return case(
-            (override_value == "true", False),
-            (override_value == "false", True),
-            else_=func.coalesce(AssetMetadata.low_quality_flag, False),
-        )
-
-    def _latest_override_value_expr(self, override_type: OverrideType):
-        """Return latest override value subquery for a given asset and type."""
-        return (
-            select(Override.value)
-            .where(
-                Override.asset_id == Asset.id,
-                Override.type == override_type,
-            )
-            .order_by(Override.created_at.desc())
-            .limit(1)
-            .scalar_subquery()
-        )
-
     def _infer_query_categories(self, query: str) -> set[str]:
         """Infer likely categories from the free-text search query."""
         query_lower = query.lower()
@@ -424,44 +371,3 @@ class RetrievalService:
                 inferred.add(category)
 
         return inferred
-
-    def _asset_response_with_overrides(self, asset: Asset) -> AssetResponse:
-        """Build asset response applying caption/tag overrides."""
-        response_data = AssetResponse.model_validate(asset).model_dump()
-        metadata = response_data.get("metadata")
-        if metadata is None:
-            return AssetResponse.model_validate(asset)
-
-        caption_override = self._latest_override_from_asset(
-            asset, OverrideType.CAPTION_OVERRIDE
-        )
-        if caption_override is not None:
-            metadata["caption"] = caption_override.value
-
-        tag_override = self._latest_override_from_asset(
-            asset, OverrideType.TAG_OVERRIDE
-        )
-        if tag_override is not None and tag_override.value:
-            try:
-                metadata["tags"] = json.loads(tag_override.value)
-            except json.JSONDecodeError:
-                metadata["tags"] = metadata.get("tags", [])
-
-        return AssetResponse.model_validate(response_data)
-
-    def _latest_override_from_asset(
-        self, asset: Asset, override_type: OverrideType
-    ) -> Override | None:
-        """Return latest in-memory override for a loaded asset relation."""
-        matching = [
-            override for override in asset.overrides if override.type == override_type
-        ]
-        if not matching:
-            return None
-        matching.sort(key=lambda override: override.created_at, reverse=True)
-        return matching[0]
-
-    def _is_pinned_asset(self, asset: Asset) -> bool:
-        """Return whether an asset is manually pinned."""
-        override = self._latest_override_from_asset(asset, OverrideType.PIN)
-        return override is not None and override.value == "true"

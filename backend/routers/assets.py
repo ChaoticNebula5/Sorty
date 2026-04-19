@@ -51,7 +51,14 @@ async def reprocess_asset(
 ) -> dict[str, Any]:
     """Requeue an asset for metadata enrichment."""
     service = ProcessingService(db)
-    result = await service.reprocess_asset(asset_id)
+    try:
+        result = await service.reprocess_asset(asset_id)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "REPROCESS_QUEUE_UNAVAILABLE", "message": str(exc)},
+        ) from exc
+
     if result is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -69,7 +76,14 @@ async def cluster_event(
 ) -> dict[str, Any]:
     """Manually enqueue duplicate clustering for an event."""
     service = ProcessingService(db)
-    result = await service.enqueue_event_clustering(event_id)
+    try:
+        result = await service.enqueue_event_clustering(event_id)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"code": "CLUSTER_QUEUE_UNAVAILABLE", "message": str(exc)},
+        ) from exc
+
     if result is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

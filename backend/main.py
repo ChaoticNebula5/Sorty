@@ -18,6 +18,7 @@ from backend.routers import (
     collections,
     events,
     export,
+    overrides,
     search,
     upload,
 )
@@ -52,6 +53,7 @@ app.include_router(assets.router, prefix="/api/v1")
 app.include_router(search.router, prefix="/api/v1")
 app.include_router(collections.router, prefix="/api/v1")
 app.include_router(export.router, prefix="/api/v1")
+app.include_router(overrides.router, prefix="/api/v1")
 app.include_router(assistant.router, prefix="/api/v1")
 
 
