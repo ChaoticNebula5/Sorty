@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 ProcessingJob ORM model.
 Tracks background processing jobs for assets with retry logic.
@@ -5,6 +7,7 @@ See PRD §6 (Database Schema) and §7 (Data Models).
 """
 
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 from sqlalchemy import (
     ForeignKey,
@@ -18,6 +21,9 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backend.database import Base
 import enum
+
+if TYPE_CHECKING:
+    from backend.models.asset import Asset
 
 
 class JobType(str, enum.Enum):
@@ -34,6 +40,9 @@ class JobStatus(str, enum.Enum):
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+ENUM_VALUES = lambda enum_cls: [member.value for member in enum_cls]  # noqa: E731
 
 
 class ProcessingJob(Base):
@@ -57,11 +66,22 @@ class ProcessingJob(Base):
 
     # Job metadata
     job_type: Mapped[JobType] = mapped_column(
-        SQLEnum(JobType, name="job_type"), nullable=False
+        SQLEnum(
+            JobType,
+            name="job_type",
+            values_callable=ENUM_VALUES,
+            validate_strings=True,
+        ),
+        nullable=False,
     )
 
     status: Mapped[JobStatus] = mapped_column(
-        SQLEnum(JobStatus, name="job_status"),
+        SQLEnum(
+            JobStatus,
+            name="job_status",
+            values_callable=ENUM_VALUES,
+            validate_strings=True,
+        ),
         nullable=False,
         default=JobStatus.QUEUED,
         server_default=text("'queued'"),

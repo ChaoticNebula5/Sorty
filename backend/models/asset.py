@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Asset ORM model.
 Represents an uploaded image file with processing metadata.
@@ -5,6 +7,7 @@ See PRD §6 (Database Schema) and §7 (Data Models).
 """
 
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 from sqlalchemy import (
     String,
@@ -22,6 +25,15 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backend.database import Base
 import enum
 
+if TYPE_CHECKING:
+    from backend.models.assistant_run import AssistantRun
+    from backend.models.collection import CollectionAsset
+    from backend.models.duplicate_cluster import DuplicateClusterMember
+    from backend.models.event import Event
+    from backend.models.override import Override
+    from backend.models.processing_job import ProcessingJob
+    from backend.models.asset_metadata import AssetMetadata
+
 
 class ProcessingStatus(str, enum.Enum):
     """Asset processing status enum (PRD §6)."""
@@ -30,6 +42,9 @@ class ProcessingStatus(str, enum.Enum):
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+ENUM_VALUES = lambda enum_cls: [member.value for member in enum_cls]  # noqa: E731
 
 
 class Asset(Base):
@@ -76,7 +91,12 @@ class Asset(Base):
 
     # Processing state
     processing_status: Mapped[ProcessingStatus] = mapped_column(
-        SQLEnum(ProcessingStatus, name="processing_status"),
+        SQLEnum(
+            ProcessingStatus,
+            name="processing_status",
+            values_callable=ENUM_VALUES,
+            validate_strings=True,
+        ),
         nullable=False,
         default=ProcessingStatus.PENDING,
         server_default=text("'pending'"),

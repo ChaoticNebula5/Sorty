@@ -6,7 +6,7 @@ Handles collection creation, listing, and membership changes.
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db
@@ -25,7 +25,14 @@ async def create_collection(
 ) -> dict[str, Any]:
     """Create a collection for an event."""
     service = CollectionService(db)
-    result = await service.create_collection(event_id, payload)
+    try:
+        result = await service.create_collection(event_id, payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "EVENT_NOT_FOUND", "message": str(exc)},
+        ) from exc
+
     return {"data": result.model_dump(), "error": None}
 
 
@@ -48,7 +55,20 @@ async def add_collection_assets(
 ) -> dict[str, Any]:
     """Add assets to a collection."""
     service = CollectionService(db)
-    result = await service.add_assets(collection_id, payload)
+    try:
+        result = await service.add_assets(collection_id, payload)
+    except ValueError as exc:
+        message = str(exc)
+        if message == "Collection not found":
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail={"code": "COLLECTION_NOT_FOUND", "message": message},
+            ) from exc
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "COLLECTION_ASSET_INVALID", "message": message},
+        ) from exc
+
     return {"data": result.data.model_dump(), "error": None}
 
 

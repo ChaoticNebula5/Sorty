@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 ExportJob ORM model.
 Tracks export generation state, file location, size, and expiry.
@@ -5,6 +7,7 @@ Tracks export generation state, file location, size, and expiry.
 
 import enum
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 
 from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, String, Text, text
@@ -13,6 +16,9 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.database import Base
 
+if TYPE_CHECKING:
+    from backend.models.collection import Collection
+
 
 class ExportStatus(str, enum.Enum):
     """Export job status."""
@@ -20,6 +26,9 @@ class ExportStatus(str, enum.Enum):
     GENERATING = "generating"
     READY = "ready"
     FAILED = "failed"
+
+
+ENUM_VALUES = lambda enum_cls: [member.value for member in enum_cls]  # noqa: E731
 
 
 class ExportJob(Base):
@@ -43,7 +52,12 @@ class ExportJob(Base):
     )
 
     status: Mapped[ExportStatus] = mapped_column(
-        SQLEnum(ExportStatus, name="export_status"),
+        SQLEnum(
+            ExportStatus,
+            name="export_status",
+            values_callable=ENUM_VALUES,
+            validate_strings=True,
+        ),
         nullable=False,
         default=ExportStatus.GENERATING,
         server_default=text("'generating'"),

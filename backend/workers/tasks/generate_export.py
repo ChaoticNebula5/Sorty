@@ -51,7 +51,7 @@ async def _run(export_id: UUID) -> None:
                     archive.writestr(asset.filename, file_bytes)
 
             export_job.storage_key = str(archive_path)
-            export_job.download_url = f"/exports/download/{export_job.id}"
+            export_job.download_url = f"/api/v1/exports/{export_job.id}/download"
             export_job.size_bytes = archive_path.stat().st_size
             export_job.status = ExportStatus.READY
             export_job.expires_at = datetime.now(timezone.utc) + timedelta(

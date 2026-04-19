@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 Override ORM model.
 Stores user corrections to AI-generated metadata.
@@ -5,11 +7,15 @@ See PRD §6 (Database Schema) and §7 (Data Models).
 """
 
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 from sqlalchemy import ForeignKey, Text, DateTime, Index, Enum as SQLEnum, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backend.database import Base
 import enum
+
+if TYPE_CHECKING:
+    from backend.models.asset import Asset
 
 
 class OverrideType(str, enum.Enum):
@@ -21,6 +27,9 @@ class OverrideType(str, enum.Enum):
     CAPTION_OVERRIDE = "caption_override"
     SPONSOR_VISIBLE_OVERRIDE = "sponsor_visible_override"
     USEFUL_OVERRIDE = "useful_override"
+
+
+ENUM_VALUES = lambda enum_cls: [member.value for member in enum_cls]  # noqa: E731
 
 
 class Override(Base):
@@ -41,7 +50,13 @@ class Override(Base):
 
     # Override data
     type: Mapped[OverrideType] = mapped_column(
-        SQLEnum(OverrideType, name="override_type"), nullable=False
+        SQLEnum(
+            OverrideType,
+            name="override_type",
+            values_callable=ENUM_VALUES,
+            validate_strings=True,
+        ),
+        nullable=False,
     )
 
     value: Mapped[str | None] = mapped_column(Text, nullable=True)

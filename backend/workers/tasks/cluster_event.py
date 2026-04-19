@@ -7,7 +7,7 @@ import asyncio
 from collections import defaultdict
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import AsyncSessionLocal
@@ -16,6 +16,7 @@ from backend.models import (
     AssetMetadata,
     DuplicateCluster,
     DuplicateClusterMember,
+    ProcessingStatus,
 )
 
 
@@ -50,11 +51,12 @@ async def _load_assets_with_embeddings(
         .join(Asset.asset_metadata)
         .where(
             Asset.event_id == event_id,
+            Asset.processing_status == ProcessingStatus.COMPLETED,
             AssetMetadata.embedding_vector.is_not(None),
         )
     )
     result = await db.execute(stmt)
-    return result.all()
+    return [tuple(row) for row in result.all()]
 
 
 def _build_adjacency(
@@ -126,6 +128,16 @@ async def _replace_clusters(
     for cluster in existing_clusters:
         await db.delete(cluster)
 
+    await db.execute(
+        update(AssetMetadata)
+        .where(
+            AssetMetadata.asset_id.in_(
+                select(Asset.id).where(Asset.event_id == event_id)
+            )
+        )
+        .values(duplicate_hidden=False)
+    )
+
     for component in components:
         ranked_assets = sorted(
             (asset_map[asset_id] for asset_id in component),
@@ -146,12 +158,14 @@ async def _replace_clusters(
         await db.flush()
 
         for rank, (asset, metadata) in enumerate(ranked_assets, start=1):
+            representative_vector = ranked_assets[0][1].embedding_vector
+            metadata_vector = metadata.embedding_vector
             similarity = (
                 1.0
                 if asset.id == representative_asset.id
                 else _cosine_similarity(
-                    metadata.embedding_vector,
-                    ranked_assets[0][1].embedding_vector,
+                    metadata_vector or [],
+                    representative_vector or [],
                 )
             )
 

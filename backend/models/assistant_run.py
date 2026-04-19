@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """
 AssistantRun ORM model.
 Tracks assistant action execution for audit trail.
@@ -5,12 +7,16 @@ See PRD §6 (Database Schema) and §7 (Data Models).
 """
 
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 from sqlalchemy import ForeignKey, DateTime, Index, Enum as SQLEnum, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.dialects.postgresql import JSONB
 from backend.database import Base
 import enum
+
+if TYPE_CHECKING:
+    from backend.models.event import Event
 
 
 class AssistantAction(str, enum.Enum):
@@ -20,6 +26,9 @@ class AssistantAction(str, enum.Enum):
     FIND_SPONSOR_VISIBLE_MEDIA = "find_sponsor_visible_media"
     SHOW_BEST_STAGE_SHOTS = "show_best_stage_shots"
     BUILD_COLLECTION_FROM_FILTERS = "build_collection_from_filters"
+
+
+ENUM_VALUES = lambda enum_cls: [member.value for member in enum_cls]  # noqa: E731
 
 
 class AssistantRun(Base):
@@ -40,7 +49,13 @@ class AssistantRun(Base):
 
     # Action metadata
     action_type: Mapped[AssistantAction] = mapped_column(
-        SQLEnum(AssistantAction, name="assistant_action"), nullable=False
+        SQLEnum(
+            AssistantAction,
+            name="assistant_action",
+            values_callable=ENUM_VALUES,
+            validate_strings=True,
+        ),
+        nullable=False,
     )
 
     input: Mapped[dict] = mapped_column(

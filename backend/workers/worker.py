@@ -3,7 +3,7 @@ RQ worker entrypoint for Sorty.
 Starts workers for enrichment, clustering, and export queues.
 """
 
-from rq import Connection, Worker
+from rq import Worker
 
 from backend.workers.queues import (
     get_clustering_queue,
@@ -22,9 +22,8 @@ def main() -> None:
         get_export_queue(),
     ]
 
-    with Connection(redis_connection):
-        worker = Worker([queue.name for queue in queues])
-        worker.work()
+    worker = Worker([queue.name for queue in queues], connection=redis_connection)
+    worker.work()
 
 
 if __name__ == "__main__":

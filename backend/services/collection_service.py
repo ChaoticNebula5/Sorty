@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.models import Collection, CollectionAsset
+from backend.models import Asset, Collection, CollectionAsset, Event
 from backend.schemas.collection import (
     AddCollectionAssetsRequest,
     AddCollectionAssetsResponse,
@@ -33,6 +33,12 @@ class CollectionService:
         self, event_id: UUID, payload: CollectionCreate
     ) -> CollectionResponse:
         """Create a new collection for an event."""
+        event_exists = await self.db.execute(
+            select(Event.id).where(Event.id == event_id)
+        )
+        if event_exists.scalar_one_or_none() is None:
+            raise ValueError("Event not found")
+
         collection = Collection(event_id=event_id, name=payload.name)
         self.db.add(collection)
         await self.db.commit()
@@ -82,12 +88,29 @@ class CollectionService:
         self, collection_id: UUID, payload: AddCollectionAssetsRequest
     ) -> AddCollectionAssetsResponse:
         """Add assets to a collection, skipping existing links."""
+        collection_stmt = select(Collection).where(Collection.id == collection_id)
+        collection_result = await self.db.execute(collection_stmt)
+        collection = collection_result.scalar_one_or_none()
+        if collection is None:
+            raise ValueError("Collection not found")
+
+        asset_stmt = select(Asset.id).where(
+            Asset.id.in_(payload.asset_ids),
+            Asset.event_id == collection.event_id,
+        )
+        asset_result = await self.db.execute(asset_stmt)
+        valid_asset_ids = set(asset_result.scalars().all())
+        requested_asset_ids = set(payload.asset_ids)
+        invalid_asset_ids = requested_asset_ids - valid_asset_ids
+        if invalid_asset_ids:
+            raise ValueError("One or more assets are invalid for this collection")
+
         stmt = (
             insert(CollectionAsset)
             .values(
                 [
                     {"collection_id": collection_id, "asset_id": asset_id}
-                    for asset_id in payload.asset_ids
+                    for asset_id in requested_asset_ids
                 ]
             )
             .on_conflict_do_nothing(index_elements=["collection_id", "asset_id"])
@@ -100,7 +123,7 @@ class CollectionService:
         return AddCollectionAssetsResponse(
             data=AddCollectionAssetsResponseData(
                 added=added,
-                already_present=len(payload.asset_ids) - added,
+                already_present=len(requested_asset_ids) - added,
             )
         )
 
