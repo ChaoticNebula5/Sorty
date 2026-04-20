@@ -5,7 +5,7 @@ Handles asset listing, smart views, and PRD-aligned hybrid search.
 
 from uuid import UUID
 
-from sqlalchemy import Float, case, desc, func, or_, select
+from sqlalchemy import Float, bindparam, case, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -126,7 +126,15 @@ class RetrievalService:
             )
         )
 
-        cosine_distance = AssetMetadata.embedding_vector.op("<=>")(query_vector)
+        # Bind with the column's Vector type explicitly to avoid malformed asyncpg binds.
+        query_vector_param = bindparam(
+            "query_vector",
+            value=query_vector,
+            type_=AssetMetadata.embedding_vector.type,
+        )
+        cosine_distance = AssetMetadata.embedding_vector.cosine_distance(
+            query_vector_param
+        )
         semantic_similarity_expr = (1.0 - cosine_distance).cast(Float)
 
         vector_stmt = (
