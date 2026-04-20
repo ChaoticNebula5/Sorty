@@ -79,7 +79,9 @@ class ExportJob(Base):
         nullable=True,
     )
 
-    collection: Mapped["Collection"] = relationship("Collection")
+    collection: Mapped["Collection"] = relationship(
+        "Collection", back_populates="export_jobs"
+    )
 
     def __repr__(self) -> str:
         return f"<ExportJob(id={self.id}, status={self.status.value})>"

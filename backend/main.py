@@ -99,6 +99,6 @@ async def request_validation_exception_handler(
 
 
 @app.get("/health")
-async def health_check() -> dict[str, str]:
+async def health_check() -> dict[str, object]:
     """Simple health check endpoint."""
-    return {"status": "ok"}
+    return {"data": {"status": "ok"}, "error": None}

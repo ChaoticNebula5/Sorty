@@ -5,10 +5,14 @@ See PRD §6 (Database Schema) and §7 (Data Models).
 """
 
 from datetime import datetime, timezone
+from typing import TYPE_CHECKING
 from uuid import UUID, uuid4
 from sqlalchemy import ForeignKey, String, DateTime, Index, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from backend.database import Base
+
+if TYPE_CHECKING:
+    from backend.models.export_job import ExportJob
 
 
 class Collection(Base):
@@ -42,6 +46,13 @@ class Collection(Base):
 
     asset_associations: Mapped[list["CollectionAsset"]] = relationship(
         "CollectionAsset",
+        back_populates="collection",
+        cascade="all, delete-orphan",
+        lazy="selectin",
+    )
+
+    export_jobs: Mapped[list["ExportJob"]] = relationship(
+        "ExportJob",
         back_populates="collection",
         cascade="all, delete-orphan",
         lazy="selectin",

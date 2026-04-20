@@ -4,9 +4,11 @@ See PRD section 9.7 (Assistant API).
 """
 
 from uuid import UUID
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, Field
+
+from backend.models import AssistantAction
 
 
 class AssistantActionParams(BaseModel):
@@ -20,12 +22,7 @@ class AssistantActionParams(BaseModel):
 class AssistantActionRequest(BaseModel):
     """Request schema for assistant action endpoint."""
 
-    action_type: Literal[
-        "create_instagram_pack",
-        "find_sponsor_visible_media",
-        "show_best_stage_shots",
-        "build_collection_from_filters",
-    ]
+    action_type: AssistantAction
     params: AssistantActionParams = Field(default_factory=AssistantActionParams)
 
 
@@ -43,12 +40,7 @@ class AssistantActionResponseData(BaseModel):
     """Response envelope data for assistant action endpoint."""
 
     run_id: UUID
-    action_type: Literal[
-        "create_instagram_pack",
-        "find_sponsor_visible_media",
-        "show_best_stage_shots",
-        "build_collection_from_filters",
-    ]
+    action_type: AssistantAction
     result: AssistantActionResult
 
 
