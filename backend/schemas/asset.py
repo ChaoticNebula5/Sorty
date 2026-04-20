@@ -8,6 +8,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from backend.models import JobStatus, ProcessingStatus
+
 
 class AssetMetadataResponse(BaseModel):
     """Response schema for enriched asset metadata."""
@@ -39,7 +41,7 @@ class AssetResponse(BaseModel):
     height: int | None = None
     file_size: int
     uploaded_at: datetime
-    processing_status: str
+    processing_status: ProcessingStatus
     metadata: AssetMetadataResponse | None = Field(
         default=None, validation_alias="asset_metadata"
     )
@@ -67,7 +69,7 @@ class UploadAssetItem(BaseModel):
 
     id: UUID
     filename: str
-    processing_status: str
+    processing_status: ProcessingStatus
 
 
 class UploadResponseData(BaseModel):
@@ -89,7 +91,7 @@ class ReprocessResponseData(BaseModel):
     """Reprocess response payload."""
 
     job_id: UUID
-    status: str
+    status: JobStatus
 
 
 class ReprocessResponse(BaseModel):

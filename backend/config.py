@@ -78,6 +78,9 @@ class Settings(BaseSettings):
     retry_delays_seconds: list[int] = Field(
         default=[2, 4, 8], description="Retry delays in seconds for attempts 1, 2, 3"
     )
+    clustering_max_neighbors: int = Field(
+        default=50, description="Maximum nearest neighbors checked during clustering"
+    )
 
     # Export
     export_dir: str = Field(

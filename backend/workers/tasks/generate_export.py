@@ -6,7 +6,8 @@ Builds a ZIP archive for a collection and updates export job state.
 import asyncio
 import json
 from datetime import datetime, timedelta, timezone
-from io import BytesIO
+from pathlib import Path
+from tempfile import NamedTemporaryFile
 from uuid import UUID
 from zipfile import ZIP_DEFLATED, ZipFile
 
@@ -58,49 +59,60 @@ async def _run(export_id: UUID) -> None:
             assets = asset_result.scalars().all()
             storage = get_storage()
 
-            export_buffer = BytesIO()
             metadata_rows: list[dict] = []
             used_filenames: set[str] = set()
+            temp_archive_path: str | None = None
 
-            with ZipFile(export_buffer, "w", compression=ZIP_DEFLATED) as archive:
-                for asset in assets:
-                    if is_hidden_asset(asset) or is_effective_low_quality_asset(asset):
-                        continue
+            with NamedTemporaryFile(suffix=".zip", delete=False) as temp_file:
+                temp_archive_path = temp_file.name
 
-                    asset_response = asset_response_with_overrides(asset)
-                    metadata = asset_response.metadata
-                    if metadata is None:
-                        continue
+            try:
+                with ZipFile(
+                    temp_archive_path, "w", compression=ZIP_DEFLATED
+                ) as archive:
+                    for asset in assets:
+                        if is_hidden_asset(asset) or is_effective_low_quality_asset(
+                            asset
+                        ):
+                            continue
 
-                    file_bytes = await storage.get(asset.storage_key)
-                    archive_name = _unique_archive_name(
-                        asset.filename, asset.id, used_filenames
+                        asset_response = asset_response_with_overrides(asset)
+                        metadata = asset_response.metadata
+                        if metadata is None:
+                            continue
+
+                        file_bytes = await storage.get(asset.storage_key)
+                        archive_name = _unique_archive_name(
+                            asset.filename, asset.id, used_filenames
+                        )
+                        archive.writestr(archive_name, file_bytes)
+                        metadata_rows.append(
+                            {
+                                "filename": archive_name,
+                                "caption": metadata.caption,
+                                "tags": metadata.tags,
+                                "usefulness_score": metadata.usefulness_score,
+                                "primary_category": metadata.primary_category,
+                            }
+                        )
+
+                    archive.writestr(
+                        "metadata.json",
+                        json.dumps(metadata_rows, indent=2).encode("utf-8"),
                     )
-                    archive.writestr(archive_name, file_bytes)
-                    metadata_rows.append(
-                        {
-                            "filename": archive_name,
-                            "caption": metadata.caption,
-                            "tags": metadata.tags,
-                            "usefulness_score": metadata.usefulness_score,
-                            "primary_category": metadata.primary_category,
-                        }
-                    )
 
-                archive.writestr(
-                    "metadata.json",
-                    json.dumps(metadata_rows, indent=2).encode("utf-8"),
+                export_storage_key = await storage.put_file(
+                    temp_archive_path,
+                    f"exports/{export_job.id}.zip",
                 )
-
-            export_bytes = export_buffer.getvalue()
-            export_storage_key = await storage.put_bytes(
-                export_bytes,
-                f"exports/{export_job.id}.zip",
-            )
+                export_size_bytes = Path(temp_archive_path).stat().st_size
+            finally:
+                if temp_archive_path is not None:
+                    Path(temp_archive_path).unlink(missing_ok=True)
 
             export_job.storage_key = export_storage_key
             export_job.download_url = f"/api/v1/exports/{export_job.id}/download"
-            export_job.size_bytes = len(export_bytes)
+            export_job.size_bytes = export_size_bytes
             export_job.status = ExportStatus.READY
             export_job.expires_at = datetime.now(timezone.utc) + timedelta(
                 seconds=settings.export_link_ttl_seconds

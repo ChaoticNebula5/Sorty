@@ -6,7 +6,7 @@ Handles export size validation, export job creation, and export status lookup.
 from uuid import UUID
 
 from redis import Redis
-from rq import Queue
+from rq import Queue, Retry
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -68,6 +68,10 @@ class ExportService:
             self.export_queue.enqueue(
                 "backend.workers.tasks.generate_export.run",
                 str(export_job.id),
+                retry=Retry(
+                    max=settings.max_retries,
+                    interval=settings.retry_delays_seconds,
+                ),
             )
         except Exception as exc:
             export_job.status = ExportStatus.FAILED
@@ -78,7 +82,7 @@ class ExportService:
         return ExportResponse(
             data=ExportResponseData(
                 export_id=export_job.id,
-                status=export_job.status.value,
+                status=export_job.status,
                 estimated_size_bytes=estimated_size_bytes,
                 asset_count=asset_count,
             )
@@ -93,7 +97,7 @@ class ExportService:
         return ExportStatusResponse(
             data=ExportStatusResponseData(
                 export_id=export_job.id,
-                status=export_job.status.value,
+                status=export_job.status,
                 download_url=export_job.download_url,
                 expires_at=export_job.expires_at,
                 size_bytes=export_job.size_bytes,

@@ -5,6 +5,7 @@ Optimized for local-first development.
 """
 
 from pathlib import Path
+import shutil
 import aiofiles
 import boto3
 from botocore.exceptions import ClientError
@@ -24,6 +25,10 @@ class StorageBackend:
 
     async def put_bytes(self, file_bytes: bytes, storage_key: str) -> str:
         """Store arbitrary bytes at a specific storage key."""
+        raise NotImplementedError
+
+    async def put_file(self, file_path: str, storage_key: str) -> str:
+        """Store a file from disk at a specific storage key."""
         raise NotImplementedError
 
     async def get(self, storage_key: str) -> bytes:
@@ -80,6 +85,13 @@ class LocalStorage(StorageBackend):
         async with aiofiles.open(file_path, "wb") as f:
             await f.write(file_bytes)
 
+        return storage_key
+
+    async def put_file(self, file_path: str, storage_key: str) -> str:
+        """Store a file from disk locally with an explicit storage key."""
+        destination = self.base_path / storage_key
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(file_path, destination)
         return storage_key
 
     async def get(self, storage_key: str) -> bytes:
@@ -161,6 +173,14 @@ class S3Storage(StorageBackend):
             self.s3_client.put_object(
                 Bucket=self.bucket, Key=storage_key, Body=file_bytes
             )
+            return storage_key
+        except ClientError as e:
+            raise RuntimeError(f"S3 upload failed: {e}")
+
+    async def put_file(self, file_path: str, storage_key: str) -> str:
+        """Upload a file from disk to S3 at an explicit storage key."""
+        try:
+            self.s3_client.upload_file(file_path, self.bucket, storage_key)
             return storage_key
         except ClientError as e:
             raise RuntimeError(f"S3 upload failed: {e}")

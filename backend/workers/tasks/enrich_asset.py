@@ -9,6 +9,7 @@ from io import BytesIO
 from uuid import UUID
 
 from PIL import Image
+from rq import get_current_job
 from sqlalchemy import select
 
 from backend.ai.captioner import get_captioner
@@ -59,83 +60,80 @@ async def _run(asset_id: UUID, job_id: UUID) -> None:
         asset.error_message = None
         await db.commit()
 
-        last_error: Exception | None = None
-        max_attempts = max(1, settings.max_retries)
+        current_job = get_current_job()
+        retry_count = 0
+        retries_left = 0
+        if current_job is not None:
+            retries_left = current_job.retries_left or 0
+            retry_count = max(settings.max_retries - retries_left - 1, 0)
 
-        for attempt in range(1, max_attempts + 1):
-            job.retry_count = attempt - 1
-            await db.commit()
-
-            try:
-                storage = get_storage()
-                image_bytes = await storage.get(asset.storage_key)
-
-                thumbnail_bytes = _build_thumbnail(image_bytes)
-                await storage.put_thumbnail(thumbnail_bytes, asset.file_hash)
-
-                caption_result = _build_caption_result(image_bytes, asset.mime_type)
-                embedding_vector = get_embedder().embed_image_bytes(image_bytes)
-                quality_result = get_quality_scorer().score_image_bytes(image_bytes)
-                sponsor_result = get_sponsor_scorer().score_caption_result(
-                    caption_result
-                )
-
-                metadata_stmt = select(AssetMetadata).where(
-                    AssetMetadata.asset_id == asset.id
-                )
-                metadata_result = await db.execute(metadata_stmt)
-                metadata = metadata_result.scalar_one_or_none()
-
-                if metadata is None:
-                    metadata = AssetMetadata(asset_id=asset.id)
-                    db.add(metadata)
-
-                metadata.caption = caption_result.get("caption")
-                metadata.tags_json = caption_result.get("tags", [])
-                metadata.primary_category = caption_result.get("primary_category")
-                metadata.category_scores_json = caption_result.get(
-                    "category_scores", {}
-                )
-                metadata.embedding_vector = embedding_vector
-                metadata.usefulness_score = int(quality_result["usefulness_score"])
-                metadata.blur_score = float(quality_result["blur_score"])
-                metadata.brightness_score = float(quality_result["brightness_score"])
-                metadata.sponsor_visible_score = float(
-                    sponsor_result["sponsor_visible_score"]
-                )
-                metadata.low_quality_flag = bool(quality_result["low_quality_flag"])
-
-                asset.processing_status = ProcessingStatus.COMPLETED
-                job.status = JobStatus.COMPLETED
-                job.error_message = None
-                job.completed_at = datetime.now(timezone.utc)
-                await db.commit()
-                return
-            except Exception as exc:
-                await db.rollback()
-                last_error = exc
-
-                job = await db.get(ProcessingJob, job_id)
-                asset = await db.get(Asset, asset_id)
-                if job is None or asset is None:
-                    raise
-
-                if attempt < max_attempts:
-                    delay_index = min(
-                        attempt - 1, len(settings.retry_delays_seconds) - 1
-                    )
-                    await asyncio.sleep(settings.retry_delays_seconds[delay_index])
-                    continue
-
-        job.status = JobStatus.FAILED
-        job.error_message = str(last_error)
-        job.completed_at = datetime.now(timezone.utc)
-        asset.processing_status = ProcessingStatus.FAILED
-        asset.error_message = str(last_error)
+        job.retry_count = retry_count
         await db.commit()
 
-        if last_error is not None:
-            raise last_error
+        try:
+            storage = get_storage()
+            image_bytes = await storage.get(asset.storage_key)
+
+            thumbnail_bytes = _build_thumbnail(image_bytes)
+            await storage.put_thumbnail(thumbnail_bytes, asset.file_hash)
+
+            caption_result = _build_caption_result(image_bytes, asset.mime_type)
+            embedding_vector = get_embedder().embed_image_bytes(image_bytes)
+            quality_result = get_quality_scorer().score_image_bytes(image_bytes)
+            sponsor_result = get_sponsor_scorer().score_caption_result(caption_result)
+
+            metadata_stmt = select(AssetMetadata).where(
+                AssetMetadata.asset_id == asset.id
+            )
+            metadata_result = await db.execute(metadata_stmt)
+            metadata = metadata_result.scalar_one_or_none()
+
+            if metadata is None:
+                metadata = AssetMetadata(asset_id=asset.id)
+                db.add(metadata)
+
+            metadata.caption = caption_result.get("caption")
+            metadata.tags_json = caption_result.get("tags", [])
+            metadata.primary_category = caption_result.get("primary_category")
+            metadata.category_scores_json = caption_result.get("category_scores", {})
+            metadata.embedding_vector = embedding_vector
+            metadata.usefulness_score = int(quality_result["usefulness_score"])
+            metadata.blur_score = float(quality_result["blur_score"])
+            metadata.brightness_score = float(quality_result["brightness_score"])
+            metadata.sponsor_visible_score = float(
+                sponsor_result["sponsor_visible_score"]
+            )
+            metadata.low_quality_flag = bool(quality_result["low_quality_flag"])
+
+            asset.processing_status = ProcessingStatus.COMPLETED
+            job.status = JobStatus.COMPLETED
+            job.error_message = None
+            job.completed_at = datetime.now(timezone.utc)
+            await db.commit()
+            return
+        except Exception as exc:
+            await db.rollback()
+
+            job = await db.get(ProcessingJob, job_id)
+            asset = await db.get(Asset, asset_id)
+            if job is None or asset is None:
+                raise
+
+            if retries_left > 0:
+                job.status = JobStatus.QUEUED
+                job.error_message = f"Retry scheduled after failure: {exc}"
+                asset.processing_status = ProcessingStatus.PENDING
+                asset.error_message = str(exc)
+                await db.commit()
+            else:
+                job.status = JobStatus.FAILED
+                job.error_message = str(exc)
+                job.completed_at = datetime.now(timezone.utc)
+                asset.processing_status = ProcessingStatus.FAILED
+                asset.error_message = str(exc)
+                await db.commit()
+
+            raise
 
 
 def _build_thumbnail(image_bytes: bytes) -> bytes:

@@ -10,7 +10,7 @@ from uuid import UUID
 from fastapi import UploadFile
 from PIL import Image, UnidentifiedImageError
 from redis import Redis
-from rq import Queue
+from rq import Queue, Retry
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -137,6 +137,10 @@ class UploadService:
                     "backend.workers.tasks.enrich_asset.run",
                     asset_id,
                     job_id,
+                    retry=Retry(
+                        max=settings.max_retries,
+                        interval=settings.retry_delays_seconds,
+                    ),
                 )
             except Exception as exc:
                 asset = await self.db.get(Asset, UUID(asset_id))

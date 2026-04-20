@@ -22,7 +22,6 @@ from backend.workers.queues import get_redis_connection
 
 
 SIMILARITY_THRESHOLD = 0.90
-MAX_NEIGHBORS = 20
 
 
 def run(event_id: str, lock_token: str) -> None:
@@ -113,7 +112,7 @@ async def _build_adjacency(
                 AssetMetadata.embedding_vector.is_not(None),
             )
             .order_by(cosine_distance)
-            .limit(MAX_NEIGHBORS)
+            .limit(settings.clustering_max_neighbors)
         )
         neighbor_result = await db.execute(neighbor_stmt)
 

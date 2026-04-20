@@ -6,7 +6,7 @@ Handles asset reprocessing and manual event clustering job enqueueing.
 from uuid import UUID, uuid4
 
 from redis import Redis
-from rq import Queue
+from rq import Queue, Retry
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.config import settings
@@ -59,6 +59,10 @@ class ProcessingService:
                 "backend.workers.tasks.enrich_asset.run",
                 str(asset.id),
                 str(job.id),
+                retry=Retry(
+                    max=settings.max_retries,
+                    interval=settings.retry_delays_seconds,
+                ),
             )
         except Exception as exc:
             job.status = JobStatus.FAILED
@@ -93,6 +97,10 @@ class ProcessingService:
                 "backend.workers.tasks.cluster_event.run",
                 str(event_id),
                 lock_token,
+                retry=Retry(
+                    max=settings.max_retries,
+                    interval=settings.retry_delays_seconds,
+                ),
             )
         except Exception as exc:
             self.redis.delete(lock_key)
