@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from backend.config import settings
-from backend.database import AsyncSessionLocal
+from backend.database import AsyncSessionLocal, close_db
 from backend.models import Asset, CollectionAsset, ExportJob, ExportStatus
 from backend.services.effective_asset_state import (
     asset_response_with_overrides,
@@ -26,7 +26,15 @@ from backend.storage import get_storage
 
 def run(export_id: str) -> None:
     """RQ entrypoint for generating an export ZIP."""
-    asyncio.run(_run(UUID(export_id)))
+    asyncio.run(_run_with_cleanup(UUID(export_id)))
+
+
+async def _run_with_cleanup(export_id: UUID) -> None:
+    """Run task and dispose DB connections bound to the event loop."""
+    try:
+        await _run(export_id)
+    finally:
+        await close_db()
 
 
 async def _run(export_id: UUID) -> None:

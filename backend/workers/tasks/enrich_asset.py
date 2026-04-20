@@ -15,7 +15,7 @@ from backend.ai.captioner import get_captioner
 from backend.ai.embedder import get_embedder
 from backend.ai.quality import get_quality_scorer
 from backend.ai.sponsor import get_sponsor_scorer
-from backend.database import AsyncSessionLocal
+from backend.database import AsyncSessionLocal, close_db
 from backend.models import (
     Asset,
     AssetMetadata,
@@ -33,7 +33,15 @@ THUMBNAIL_JPEG_QUALITY = 80
 
 def run(asset_id: str, job_id: str) -> None:
     """RQ entrypoint for enriching a single asset."""
-    asyncio.run(_run(UUID(asset_id), UUID(job_id)))
+    asyncio.run(_run_with_cleanup(UUID(asset_id), UUID(job_id)))
+
+
+async def _run_with_cleanup(asset_id: UUID, job_id: UUID) -> None:
+    """Run task and dispose DB connections bound to the event loop."""
+    try:
+        await _run(asset_id, job_id)
+    finally:
+        await close_db()
 
 
 async def _run(asset_id: UUID, job_id: UUID) -> None:

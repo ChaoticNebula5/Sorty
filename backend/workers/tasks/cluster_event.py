@@ -10,7 +10,7 @@ from uuid import UUID
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.database import AsyncSessionLocal
+from backend.database import AsyncSessionLocal, close_db
 from backend.models import (
     Asset,
     AssetMetadata,
@@ -27,7 +27,15 @@ MAX_NEIGHBORS = 20
 
 def run(event_id: str, lock_token: str) -> None:
     """RQ entrypoint for clustering an event."""
-    asyncio.run(_run(UUID(event_id), lock_token))
+    asyncio.run(_run_with_cleanup(UUID(event_id), lock_token))
+
+
+async def _run_with_cleanup(event_id: UUID, lock_token: str) -> None:
+    """Run task and dispose DB connections bound to the event loop."""
+    try:
+        await _run(event_id, lock_token)
+    finally:
+        await close_db()
 
 
 async def _run(event_id: UUID, lock_token: str) -> None:
