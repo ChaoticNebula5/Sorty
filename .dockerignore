@@ -1,0 +1,15 @@
+.git
+.venv
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.pyc
+
+.env
+storage/
+minio_data/
+postgres_data/
+
+sorty_ai_coding_bundle.zip
+Sorty_AI_FULL_BUILD_CONTEXT_PACK.md
