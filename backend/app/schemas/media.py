@@ -31,6 +31,8 @@ class BatchUploadRejectedItem(BaseModel):
 
 class BatchUploadResponse(BaseModel):
     event_id: uuid.UUID
+    job_id: uuid.UUID | None
+    job_status: str | None
     accepted_count: int
     rejected_count: int
     media_ids: list[uuid.UUID]

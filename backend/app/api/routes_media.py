@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_db, require_api_key
 from app.schemas.common import APIListResponse, APIResponse, Pagination
 from app.schemas.media import BatchUploadRejectedItem, BatchUploadResponse, MediaAssetRead
-from app.services import event_service, media_service, storage_factory
+from app.services import event_service, job_service, media_service, queue_service, storage_factory
 from app.services.media_service import MediaAssetCreate
 from app.services.storage_service import StorageService
 from app.services.thumbnail_service import ThumbnailError, generate_thumbnail_jpeg
@@ -115,6 +115,8 @@ async def batch_upload_media(
     storage = storage_factory.get_storage_service()
     accepted_media_ids: list[uuid.UUID] = []
     rejected_files: list[BatchUploadRejectedItem] = []
+    job_id: uuid.UUID | None = None
+    job_status: str | None = None
 
     for file in files:
         filename = file.filename or "unnamed"
@@ -175,8 +177,38 @@ async def batch_upload_media(
                 )
             )
 
+    if accepted_media_ids:
+        job = job_service.create_batch_job(
+            db,
+            event_id=event_id,
+            total_files=len(accepted_media_ids),
+        )
+        media_service.attach_media_to_batch_job(db, accepted_media_ids, job.id)
+
+        try:
+            rq_job_id = queue_service.enqueue_batch_processing(
+                job_id=job.id,
+                event_id=event_id,
+                media_ids=accepted_media_ids,
+            )
+        except Exception as exc:
+            job_service.mark_job_failed(db, job, "Could not enqueue processing job.")
+            media_service.mark_batch_media_failed(
+                db,
+                job.id,
+                "Could not enqueue processing job.",
+            )
+            job_id = job.id
+            job_status = "failed"
+        else:
+            queued_job = job_service.mark_job_queued(db, job, rq_job_id)
+            job_id = queued_job.id
+            job_status = queued_job.status
+
     response = BatchUploadResponse(
         event_id=event_id,
+        job_id=job_id,
+        job_status=job_status,
         accepted_count=len(accepted_media_ids),
         rejected_count=len(rejected_files),
         media_ids=accepted_media_ids,

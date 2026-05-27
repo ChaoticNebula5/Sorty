@@ -10,7 +10,9 @@ from PIL import Image
 from app.api.deps import get_db
 from app.api.routes_media import (
     event_service,
+    job_service,
     media_service,
+    queue_service,
     storage_factory,
 )
 from app.core.config import get_settings
@@ -114,6 +116,57 @@ def make_media(**overrides: object) -> SimpleNamespace:
     return SimpleNamespace(**data)
 
 
+def make_job(**overrides: object) -> SimpleNamespace:
+    job_id = uuid.uuid4()
+    event_id = uuid.uuid4()
+    now = datetime.now(UTC)
+    data = {
+        "id": job_id,
+        "event_id": event_id,
+        "current_rq_job_id": None,
+        "status": "created",
+        "total_files": 1,
+        "processed_files": 0,
+        "failed_files": 0,
+        "needs_review_count": 0,
+        "started_at": None,
+        "completed_at": None,
+        "error_message": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+    data.update(overrides)
+    return SimpleNamespace(**data)
+
+
+def patch_successful_job_queue(monkeypatch, event_id: uuid.UUID):
+    job = make_job(event_id=event_id)
+
+    monkeypatch.setattr(
+        job_service,
+        "create_batch_job",
+        lambda db, event_id, total_files: job,
+    )
+    monkeypatch.setattr(
+        media_service,
+        "attach_media_to_batch_job",
+        lambda db, media_ids, batch_job_id: None,
+    )
+    monkeypatch.setattr(
+        queue_service,
+        "enqueue_batch_processing",
+        lambda job_id, event_id, media_ids: "rq-job-id",
+    )
+    def fake_mark_job_queued(db, job, rq_job_id):
+        job.status = "queued"
+        job.current_rq_job_id = rq_job_id
+        return job
+
+    monkeypatch.setattr(job_service, "mark_job_queued", fake_mark_job_queued)
+
+    return job
+
+
 def test_batch_upload_requires_api_key() -> None:
     response = TestClient(app).post(
         f"/api/events/{uuid.uuid4()}/media/batch-upload",
@@ -145,6 +198,7 @@ def test_batch_upload_accepts_valid_file(monkeypatch) -> None:
     event_id = uuid.uuid4()
     media = make_media(event_id=event_id)
     storage = FakeStorage()
+    job = patch_successful_job_queue(monkeypatch, event_id)
 
     monkeypatch.setattr(event_service, "get_event", lambda db, event_id: object())
     monkeypatch.setattr(media_service, "create_media_asset", lambda db, payload: media)
@@ -165,8 +219,65 @@ def test_batch_upload_accepts_valid_file(monkeypatch) -> None:
     assert body["error"] is None
     assert body["data"]["accepted_count"] == 1
     assert body["data"]["rejected_count"] == 0
+    assert body["data"]["job_id"] == str(job.id)
+    assert body["data"]["job_status"] == "queued"
     assert body["data"]["media_ids"] == [str(media.id)]
     assert len(storage.puts) == 2
+
+
+def test_batch_upload_returns_failed_job_when_queue_unavailable(monkeypatch) -> None:
+    event_id = uuid.uuid4()
+    media = make_media(event_id=event_id)
+    storage = FakeStorage()
+    job = make_job(event_id=event_id)
+    failed_media_batches: list[uuid.UUID] = []
+
+    def fake_enqueue_batch_processing(job_id, event_id, media_ids):
+        raise RuntimeError("redis down")
+
+    def fake_mark_job_failed(db, job, error_message):
+        job.status = "failed"
+        job.error_message = error_message
+        return job
+
+    def fake_mark_batch_media_failed(db, batch_job_id, error_message):
+        failed_media_batches.append(batch_job_id)
+
+    monkeypatch.setattr(event_service, "get_event", lambda db, event_id: object())
+    monkeypatch.setattr(media_service, "create_media_asset", lambda db, payload: media)
+    monkeypatch.setattr(storage_factory, "get_storage_service", lambda: storage)
+    monkeypatch.setattr(
+        job_service,
+        "create_batch_job",
+        lambda db, event_id, total_files: job,
+    )
+    monkeypatch.setattr(
+        media_service,
+        "attach_media_to_batch_job",
+        lambda db, media_ids, batch_job_id: None,
+    )
+    monkeypatch.setattr(queue_service, "enqueue_batch_processing", fake_enqueue_batch_processing)
+    monkeypatch.setattr(job_service, "mark_job_failed", fake_mark_job_failed)
+    monkeypatch.setattr(media_service, "mark_batch_media_failed", fake_mark_batch_media_failed)
+    app.dependency_overrides[get_db] = override_db
+
+    try:
+        response = TestClient(app).post(
+            f"/api/events/{event_id}/media/batch-upload",
+            headers=auth_headers(),
+            files=[("files", ("photo.jpg", make_image_bytes(), "image/jpeg"))],
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["data"]["accepted_count"] == 1
+    assert body["data"]["rejected_count"] == 0
+    assert body["data"]["job_id"] == str(job.id)
+    assert body["data"]["job_status"] == "failed"
+    assert body["data"]["media_ids"] == [str(media.id)]
+    assert failed_media_batches == [job.id]
 
 
 def test_batch_upload_returns_rejected_file_for_validation_error(monkeypatch) -> None:

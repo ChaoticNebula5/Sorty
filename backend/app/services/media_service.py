@@ -66,6 +66,58 @@ def create_media_asset(db: Session, payload: MediaAssetCreate) -> MediaAsset:
     return media
 
 
+def attach_media_to_batch_job(
+    db: Session,
+    media_ids: list[uuid.UUID],
+    batch_job_id: uuid.UUID,
+) -> None:
+    if not media_ids:
+        return
+
+    media_assets = list(db.scalars(select(MediaAsset).where(MediaAsset.id.in_(media_ids))))
+    for media in media_assets:
+        media.batch_job_id = batch_job_id
+        media.processing_status = "queued"
+
+    db.commit()
+
+
+def mark_batch_media_processing(db: Session, batch_job_id: uuid.UUID) -> None:
+    media_assets = list(
+        db.scalars(select(MediaAsset).where(MediaAsset.batch_job_id == batch_job_id))
+    )
+    for media in media_assets:
+        media.processing_status = "processing"
+
+    db.commit()
+
+
+def mark_batch_media_processed(db: Session, batch_job_id: uuid.UUID) -> None:
+    media_assets = list(
+        db.scalars(select(MediaAsset).where(MediaAsset.batch_job_id == batch_job_id))
+    )
+    for media in media_assets:
+        media.processing_status = "processed"
+        media.processing_error = None
+
+    db.commit()
+
+
+def mark_batch_media_failed(
+    db: Session,
+    batch_job_id: uuid.UUID,
+    error_message: str,
+) -> None:
+    media_assets = list(
+        db.scalars(select(MediaAsset).where(MediaAsset.batch_job_id == batch_job_id))
+    )
+    for media in media_assets:
+        media.processing_status = "failed"
+        media.processing_error = error_message
+
+    db.commit()
+
+
 def list_event_media(
     db: Session,
     event_id: uuid.UUID,

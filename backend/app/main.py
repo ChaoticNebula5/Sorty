@@ -4,6 +4,7 @@ from fastapi.exceptions import RequestValidationError
 
 from app.api.routes_events import router as events_router
 from app.api.routes_health import router as health_router
+from app.api.routes_jobs import router as jobs_router
 from app.api.routes_media import router as media_router
 from app.core.config import get_settings
 from app.core.errors import http_exception_handler, validation_exception_handler
@@ -22,6 +23,7 @@ def create_app() -> FastAPI:
     app.add_exception_handler(RequestValidationError, validation_exception_handler)
     app.include_router(health_router)
     app.include_router(events_router)
+    app.include_router(jobs_router)
     app.include_router(media_router)
 
     return app
