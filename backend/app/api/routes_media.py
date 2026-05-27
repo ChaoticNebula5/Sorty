@@ -1,6 +1,8 @@
 import uuid
+from io import BytesIO
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_api_key
@@ -27,6 +29,49 @@ def media_to_read(media) -> MediaAssetRead:
     item.thumbnail_url = f"/api/media/{media.id}/thumbnail"
     item.file_url = f"/api/media/{media.id}/file"
     return item
+
+
+def get_media_or_404(db: Session, media_id: uuid.UUID):
+    media = media_service.get_media_asset(db, media_id)
+    if media is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "media_not_found",
+                "message": "Media asset not found.",
+                "details": {"media_id": str(media_id)},
+            },
+        )
+
+    return media
+
+
+def stream_storage_object(
+    object_key: str,
+    media_type: str,
+    filename: str | None = None,
+) -> StreamingResponse:
+    try:
+        data = storage_factory.get_storage_service().get_bytes(object_key)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "storage_unavailable",
+                "message": "Could not retrieve media from storage.",
+                "details": {},
+            },
+        ) from exc
+
+    headers = {}
+    if filename is not None:
+        headers["Content-Disposition"] = f'inline; filename="{filename}"'
+
+    return StreamingResponse(
+        BytesIO(data),
+        media_type=media_type,
+        headers=headers,
+    )
 
 
 def cleanup_failed_upload(
@@ -183,15 +228,41 @@ def get_media(
     media_id: uuid.UUID,
     db: Session = Depends(get_db),
 ) -> APIResponse:
-    media = media_service.get_media_asset(db, media_id)
-    if media is None:
+    media = get_media_or_404(db, media_id)
+    return APIResponse(data=media_to_read(media), error=None)
+
+
+@router.get("/media/{media_id}/thumbnail")
+def get_media_thumbnail(
+    media_id: uuid.UUID,
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    media = get_media_or_404(db, media_id)
+    if media.thumbnail_object_key is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={
-                "code": "media_not_found",
-                "message": "Media asset not found.",
+                "code": "thumbnail_not_found",
+                "message": "Thumbnail not found.",
                 "details": {"media_id": str(media_id)},
             },
         )
 
-    return APIResponse(data=media_to_read(media), error=None)
+    return stream_storage_object(
+        media.thumbnail_object_key,
+        media_type="image/jpeg",
+        filename=f"{media.id}-thumbnail.jpg",
+    )
+
+
+@router.get("/media/{media_id}/file")
+def get_media_file(
+    media_id: uuid.UUID,
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    media = get_media_or_404(db, media_id)
+    return stream_storage_object(
+        media.original_object_key,
+        media_type=media.mime_type,
+        filename=media.stored_filename,
+    )

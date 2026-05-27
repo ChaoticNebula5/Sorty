@@ -20,6 +20,9 @@ from app.services.upload_validation_service import UploadValidationError
 
 
 class FakeStorage:
+    original_data = b"original-image"
+    thumbnail_data = b"thumbnail-image"
+
     def __init__(self) -> None:
         self.puts: list[tuple[str, bytes, str]] = []
         self.deletes: list[str] = []
@@ -29,6 +32,16 @@ class FakeStorage:
 
     def delete_object(self, object_key: str) -> None:
         self.deletes.append(object_key)
+
+    def get_bytes(self, object_key: str) -> bytes:
+        if "/thumbnails/" in object_key:
+            return self.thumbnail_data
+        return self.original_data
+
+
+class UnavailableStorage(FakeStorage):
+    def get_bytes(self, object_key: str) -> bytes:
+        raise RuntimeError("storage unavailable")
 
 
 class FailingStorage(FakeStorage):
@@ -333,3 +346,111 @@ def test_get_media_returns_404(monkeypatch) -> None:
 
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "media_not_found"
+
+
+def test_get_media_thumbnail_streams_bytes(monkeypatch) -> None:
+    media = make_media()
+
+    monkeypatch.setattr(media_service, "get_media_asset", lambda db, media_id: media)
+    monkeypatch.setattr(storage_factory, "get_storage_service", lambda: FakeStorage())
+    app.dependency_overrides[get_db] = override_db
+
+    try:
+        response = TestClient(app).get(
+            f"/api/media/{media.id}/thumbnail",
+            headers=auth_headers(),
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.content == FakeStorage.thumbnail_data
+    assert response.headers["content-type"] == "image/jpeg"
+    assert media.thumbnail_object_key not in str(response.headers)
+
+
+def test_get_media_thumbnail_returns_404_when_missing(monkeypatch) -> None:
+    media = make_media(thumbnail_object_key=None)
+
+    monkeypatch.setattr(media_service, "get_media_asset", lambda db, media_id: media)
+    app.dependency_overrides[get_db] = override_db
+
+    try:
+        response = TestClient(app).get(
+            f"/api/media/{media.id}/thumbnail",
+            headers=auth_headers(),
+            follow_redirects=False,
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "thumbnail_not_found"
+
+
+def test_get_media_file_streams_bytes(monkeypatch) -> None:
+    media = make_media()
+
+    monkeypatch.setattr(media_service, "get_media_asset", lambda db, media_id: media)
+    monkeypatch.setattr(storage_factory, "get_storage_service", lambda: FakeStorage())
+    app.dependency_overrides[get_db] = override_db
+
+    try:
+        response = TestClient(app).get(
+            f"/api/media/{media.id}/file",
+            headers=auth_headers(),
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.content == FakeStorage.original_data
+    assert response.headers["content-type"] == media.mime_type
+    assert media.stored_filename in response.headers["content-disposition"]
+    assert media.original_filename not in response.headers["content-disposition"]
+    assert media.original_object_key not in str(response.headers)
+
+
+def test_get_media_file_requires_api_key() -> None:
+    response = TestClient(app).get(f"/api/media/{uuid.uuid4()}/file")
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "missing_api_key"
+
+
+def test_get_media_thumbnail_returns_404_for_missing_media(monkeypatch) -> None:
+    storage = FakeStorage()
+
+    monkeypatch.setattr(media_service, "get_media_asset", lambda db, media_id: None)
+    monkeypatch.setattr(storage_factory, "get_storage_service", lambda: storage)
+    app.dependency_overrides[get_db] = override_db
+
+    try:
+        response = TestClient(app).get(
+            f"/api/media/{uuid.uuid4()}/thumbnail",
+            headers=auth_headers(),
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "media_not_found"
+
+
+def test_get_media_file_returns_503_when_storage_unavailable(monkeypatch) -> None:
+    media = make_media()
+
+    monkeypatch.setattr(media_service, "get_media_asset", lambda db, media_id: media)
+    monkeypatch.setattr(storage_factory, "get_storage_service", lambda: UnavailableStorage())
+    app.dependency_overrides[get_db] = override_db
+
+    try:
+        response = TestClient(app).get(
+            f"/api/media/{media.id}/file",
+            headers=auth_headers(),
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "storage_unavailable"
