@@ -1,7 +1,7 @@
 import uuid
 from dataclasses import dataclass
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
@@ -81,6 +81,12 @@ def list_event_media(
             .offset(offset)
         )
     )
+
+
+def count_event_media(db: Session, event_id: uuid.UUID) -> int:
+    return db.scalar(
+        select(func.count()).select_from(MediaAsset).where(MediaAsset.event_id == event_id)
+    ) or 0
 
 
 def get_media_asset(db: Session, media_id: uuid.UUID) -> MediaAsset | None:
