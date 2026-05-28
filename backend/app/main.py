@@ -3,6 +3,7 @@ from fastapi import HTTPException
 from fastapi.exceptions import RequestValidationError
 
 from app.api.routes_events import router as events_router
+from app.api.routes_export import router as export_router
 from app.api.routes_health import router as health_router
 from app.api.routes_jobs import router as jobs_router
 from app.api.routes_media import router as media_router
@@ -29,6 +30,7 @@ def create_app() -> FastAPI:
     app.include_router(media_router)
     app.include_router(review_router)
     app.include_router(search_router)
+    app.include_router(export_router)
 
     return app
 

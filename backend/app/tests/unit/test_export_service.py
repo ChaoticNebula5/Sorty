@@ -1,0 +1,120 @@
+import uuid
+import zipfile
+from io import BytesIO
+from types import SimpleNamespace
+
+import pytest
+
+from app.schemas.export import ExportCreateRequest
+from app.services import export_service
+
+
+class FakeStorage:
+    def __init__(self) -> None:
+        self.objects = {"originals/stage.jpg": b"image-bytes"}
+        self.written = {}
+
+    def get_bytes(self, object_key: str) -> bytes:
+        return self.objects[object_key]
+
+    def put_bytes(self, object_key: str, data: bytes, content_type: str) -> None:
+        self.written[object_key] = (data, content_type)
+
+
+def make_media(**overrides: object) -> SimpleNamespace:
+    media_id = uuid.uuid4()
+    data = {
+        "id": media_id,
+        "event_id": uuid.uuid4(),
+        "original_filename": "stage/photo?.jpg",
+        "original_object_key": "originals/stage.jpg",
+        "ai_analysis": SimpleNamespace(
+            caption="A stage performance.",
+            tags=["stage"],
+            suggested_primary_folder="Performances",
+            suggested_sub_folder="Stage",
+        ),
+        "review_decision": SimpleNamespace(
+            status="approved",
+            include_in_export=True,
+            final_primary_folder="Highlights",
+            final_sub_folder="Opening",
+            final_tags=["featured"],
+        ),
+        "quality_signal": SimpleNamespace(quality_label="sharp"),
+    }
+    data.update(overrides)
+    return SimpleNamespace(**data)
+
+
+def test_sanitize_zip_segment_removes_path_separators() -> None:
+    assert export_service.sanitize_zip_segment("../Bad:Folder", "Fallback") == "_Bad_Folder"
+    assert export_service.sanitize_zip_segment("   ", "Fallback") == "Fallback"
+
+
+def test_build_export_zip_bytes_adds_media_metadata_and_summary() -> None:
+    event = SimpleNamespace(id=uuid.uuid4(), name="Cultural Fest")
+    media = make_media()
+    storage = FakeStorage()
+
+    zip_bytes = export_service.build_export_zip_bytes(event, [media], storage)
+
+    with zipfile.ZipFile(BytesIO(zip_bytes)) as archive:
+        names = archive.namelist()
+        assert "Highlights/Opening/0001-stage_photo_.jpg" in names
+        assert "metadata.csv" in names
+        assert "summary.md" in names
+        assert archive.read("Highlights/Opening/0001-stage_photo_.jpg") == b"image-bytes"
+        assert str(media.id) in archive.read("metadata.csv").decode()
+        assert "Cultural Fest" in archive.read("summary.md").decode()
+
+
+def test_should_include_media_in_export_respects_review_statuses() -> None:
+    approved = make_media()
+    rejected = make_media(
+        review_decision=SimpleNamespace(status="rejected", include_in_export=True)
+    )
+    duplicate = make_media(
+        review_decision=SimpleNamespace(status="duplicate", include_in_export=False)
+    )
+    pending = make_media(
+        review_decision=SimpleNamespace(status="pending", include_in_export=False)
+    )
+    blurry = make_media(
+        quality_signal=SimpleNamespace(quality_label="blurry"),
+    )
+
+    default_payload = ExportCreateRequest()
+    permissive_payload = ExportCreateRequest(
+        include_duplicates=True,
+        include_pending=True,
+        include_blurry=True,
+    )
+
+    assert export_service.should_include_media_in_export(approved, default_payload) is True
+    assert export_service.should_include_media_in_export(rejected, permissive_payload) is False
+    assert export_service.should_include_media_in_export(duplicate, default_payload) is False
+    assert export_service.should_include_media_in_export(duplicate, permissive_payload) is True
+    assert export_service.should_include_media_in_export(pending, default_payload) is False
+    assert export_service.should_include_media_in_export(pending, permissive_payload) is True
+    assert (
+        export_service.should_include_media_in_export(
+            blurry,
+            ExportCreateRequest(include_blurry=False),
+        )
+        is False
+    )
+
+
+def test_create_export_blocks_pending_reviews(monkeypatch) -> None:
+    event = SimpleNamespace(id=uuid.uuid4(), name="Event")
+
+    monkeypatch.setattr(export_service, "count_pending_reviews", lambda db, event_id: 1)
+
+    with pytest.raises(export_service.ExportBlockedError):
+        export_service.create_and_generate_export(
+            db=object(),
+            event=event,
+            payload=ExportCreateRequest(),
+            storage=FakeStorage(),
+        )
