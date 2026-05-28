@@ -6,11 +6,13 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_db, require_api_key
 from app.schemas.common import APIListResponse, APIResponse, Pagination
 from app.schemas.review import (
+    BulkApproveReviewRequest,
+    BulkApproveReviewResponse,
     ReviewDecisionRead,
     ReviewDecisionUpdate,
     ReviewQueueItem,
 )
-from app.services import event_service, job_service, media_service, review_service
+from app.services import event_service, media_service, review_service
 
 router = APIRouter(
     prefix="/api",
@@ -114,12 +116,51 @@ def update_media_review(
         )
 
     updated = review_service.apply_review_decision(db, decision, payload)
-    batch_job = review_service.get_review_batch_job(db, updated)
-    if (
-        batch_job is not None
-        and batch_job.status == "waiting_for_review"
-        and review_service.count_pending_reviews_for_batch(db, batch_job.id) == 0
-    ):
-        job_service.mark_job_reviewed_if_complete(db, batch_job)
-
     return APIResponse(data=review_decision_to_read(updated), error=None)
+
+
+@router.post("/events/{event_id}/review/bulk-approve")
+def bulk_approve_event_reviews(
+    event_id: uuid.UUID,
+    payload: BulkApproveReviewRequest,
+    db: Session = Depends(get_db),
+) -> APIResponse:
+    event = event_service.get_event(db, event_id)
+    if event is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "event_not_found",
+                "message": "Event not found.",
+                "details": {"event_id": str(event_id)},
+            },
+        )
+
+    try:
+        decisions = review_service.bulk_approve_pending_reviews(
+            db,
+            event_id=event_id,
+            media_ids=payload.media_ids,
+            reviewer_note=payload.reviewer_note,
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "bulk_approve_invalid_items",
+                "message": str(exc),
+                "details": {
+                    "event_id": str(event_id),
+                    "media_ids": [str(media_id) for media_id in payload.media_ids],
+                },
+            },
+        ) from exc
+
+    return APIResponse(
+        data=BulkApproveReviewResponse(
+            event_id=event_id,
+            approved_count=len(decisions),
+            media_ids=[decision.media_id for decision in decisions],
+        ),
+        error=None,
+    )

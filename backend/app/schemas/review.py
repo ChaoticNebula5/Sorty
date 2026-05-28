@@ -73,3 +73,34 @@ class ReviewDecisionRead(BaseModel):
     include_in_export: bool
     review_reasons: list[str]
     reviewer_note: str | None
+
+
+class BulkApproveReviewRequest(BaseModel):
+    media_ids: list[uuid.UUID] = Field(min_length=1, max_length=100)
+    reviewer_note: str | None = Field(default=None, max_length=1000)
+
+    @field_validator("media_ids")
+    @classmethod
+    def reject_duplicate_media_ids(
+        cls,
+        value: list[uuid.UUID],
+    ) -> list[uuid.UUID]:
+        if len(value) != len(set(value)):
+            raise PydanticCustomError(
+                "duplicate_media_ids",
+                "media_ids cannot contain duplicates",
+            )
+        return value
+
+    @field_validator("reviewer_note")
+    @classmethod
+    def reject_blank_reviewer_note(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
+            raise PydanticCustomError("blank_string", "field cannot be blank")
+        return value
+
+
+class BulkApproveReviewResponse(BaseModel):
+    event_id: uuid.UUID
+    approved_count: int
+    media_ids: list[uuid.UUID]

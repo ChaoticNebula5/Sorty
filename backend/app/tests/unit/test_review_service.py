@@ -1,5 +1,9 @@
+import uuid
 from types import SimpleNamespace
 
+from sqlalchemy.dialects import postgresql
+
+from app.db.models import ReviewDecision
 from app.schemas.review import ReviewDecisionUpdate
 from app.services import review_service
 
@@ -72,3 +76,30 @@ def test_apply_review_decision_marks_rejected_media_excluded() -> None:
     assert decision.include_in_export is False
     assert media.processing_status == "excluded"
     assert db.committed is True
+
+
+def test_lock_review_decision_uses_for_update() -> None:
+    captured = {}
+
+    class FakeDb:
+        def scalar(self, statement):
+            captured["statement"] = statement
+            return None
+
+    decision_id = uuid.uuid4()
+
+    result = review_service._lock_review_decision(
+        FakeDb(),
+        SimpleNamespace(id=decision_id),
+    )
+
+    compiled = str(
+        captured["statement"].compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+    assert result is None
+    assert "FOR UPDATE OF review_decisions" in compiled
+    assert str(decision_id) in compiled
+    assert ReviewDecision.__tablename__ in compiled

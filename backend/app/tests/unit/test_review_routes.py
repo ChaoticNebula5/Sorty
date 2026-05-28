@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_db
-from app.api.routes_review import event_service, job_service, media_service, review_service
+from app.api.routes_review import event_service, media_service, review_service
 from app.core.config import get_settings
 from app.main import app
 
@@ -216,8 +216,6 @@ def test_update_media_review_returns_404_for_missing_decision(monkeypatch) -> No
 def test_update_media_review_returns_decision(monkeypatch) -> None:
     media = make_media()
     decision = make_decision(media=media, media_id=media.id)
-    batch_job = SimpleNamespace(id=uuid.uuid4(), status="waiting_for_review")
-    marked_reviewed: list[uuid.UUID] = []
 
     def fake_apply_review_decision(db, decision, payload):
         decision.status = payload.status
@@ -235,13 +233,6 @@ def test_update_media_review_returns_decision(monkeypatch) -> None:
         lambda db, media_id: decision,
     )
     monkeypatch.setattr(review_service, "apply_review_decision", fake_apply_review_decision)
-    monkeypatch.setattr(review_service, "get_review_batch_job", lambda db, decision: batch_job)
-    monkeypatch.setattr(review_service, "count_pending_reviews_for_batch", lambda db, batch_job_id: 0)
-    monkeypatch.setattr(
-        job_service,
-        "mark_job_reviewed_if_complete",
-        lambda db, job: marked_reviewed.append(job.id),
-    )
     app.dependency_overrides[get_db] = override_db
 
     try:
@@ -267,4 +258,107 @@ def test_update_media_review_returns_decision(monkeypatch) -> None:
     assert body["data"]["status"] == "edited"
     assert body["data"]["final_primary_folder"] == "Performances"
     assert body["data"]["include_in_export"] is True
-    assert marked_reviewed == [batch_job.id]
+
+
+def test_bulk_approve_reviews_requires_api_key() -> None:
+    response = TestClient(app).post(
+        f"/api/events/{uuid.uuid4()}/review/bulk-approve",
+        json={"media_ids": [str(uuid.uuid4())]},
+    )
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "missing_api_key"
+
+
+def test_bulk_approve_reviews_rejects_duplicate_media_ids() -> None:
+    media_id = uuid.uuid4()
+
+    response = TestClient(app).post(
+        f"/api/events/{uuid.uuid4()}/review/bulk-approve",
+        headers=auth_headers(),
+        json={"media_ids": [str(media_id), str(media_id)]},
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "validation_error"
+
+
+def test_bulk_approve_reviews_returns_404_for_missing_event(monkeypatch) -> None:
+    monkeypatch.setattr(event_service, "get_event", lambda db, event_id: None)
+    app.dependency_overrides[get_db] = override_db
+
+    try:
+        response = TestClient(app).post(
+            f"/api/events/{uuid.uuid4()}/review/bulk-approve",
+            headers=auth_headers(),
+            json={"media_ids": [str(uuid.uuid4())]},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "event_not_found"
+
+
+def test_bulk_approve_reviews_returns_conflict_for_invalid_items(monkeypatch) -> None:
+    event_id = uuid.uuid4()
+    media_id = uuid.uuid4()
+
+    def fake_bulk_approve_pending_reviews(db, event_id, media_ids, reviewer_note=None):
+        raise ValueError("All media_ids must belong to pending review items for this event.")
+
+    monkeypatch.setattr(event_service, "get_event", lambda db, event_id: object())
+    monkeypatch.setattr(
+        review_service,
+        "bulk_approve_pending_reviews",
+        fake_bulk_approve_pending_reviews,
+    )
+    app.dependency_overrides[get_db] = override_db
+
+    try:
+        response = TestClient(app).post(
+            f"/api/events/{event_id}/review/bulk-approve",
+            headers=auth_headers(),
+            json={"media_ids": [str(media_id)]},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "bulk_approve_invalid_items"
+
+
+def test_bulk_approve_reviews_returns_approved_summary(monkeypatch) -> None:
+    event_id = uuid.uuid4()
+    media_id = uuid.uuid4()
+    media = make_media(id=media_id, event_id=event_id)
+    decision = make_decision(media=media, media_id=media_id, status="approved")
+
+    monkeypatch.setattr(event_service, "get_event", lambda db, event_id: object())
+    monkeypatch.setattr(
+        review_service,
+        "bulk_approve_pending_reviews",
+        lambda db, event_id, media_ids, reviewer_note=None: [decision],
+    )
+    app.dependency_overrides[get_db] = override_db
+
+    try:
+        response = TestClient(app).post(
+            f"/api/events/{event_id}/review/bulk-approve",
+            headers=auth_headers(),
+            json={
+                "media_ids": [str(media_id)],
+                "reviewer_note": "Looks good.",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["error"] is None
+    assert body["data"] == {
+        "event_id": str(event_id),
+        "approved_count": 1,
+        "media_ids": [str(media_id)],
+    }
