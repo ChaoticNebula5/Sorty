@@ -1,8 +1,17 @@
 import uuid
+from pathlib import Path
 from typing import Any
 
 from app.db.session import SessionLocal
-from app.services import job_service, media_service
+from app.services import (
+    analysis_service,
+    event_service,
+    job_service,
+    media_service,
+    review_service,
+    storage_factory,
+    vision_service,
+)
 
 
 def health_check_task() -> str:
@@ -19,9 +28,79 @@ def process_batch_job(payload: dict[str, Any]) -> str:
 
         try:
             job_service.mark_job_processing(db, job)
-            media_service.mark_batch_media_processing(db, job.id)
-            media_service.mark_batch_media_processed(db, job.id)
-            job_service.mark_job_completed(db, job)
+
+            storage = storage_factory.get_storage_service()
+            provider = vision_service.get_vision_provider()
+            event = event_service.get_event(db, job.event_id)
+            event_context = {
+                "event_id": str(job.event_id),
+                "name": getattr(event, "name", None),
+                "event_type": getattr(event, "event_type", None),
+            }
+            media_items = media_service.list_batch_media(
+                db,
+                job.id,
+                media_ids=None,
+            )
+            processed_files = 0
+            failed_files = 0
+            needs_review_count = 0
+
+            for media in media_items:
+                temp_path: Path | None = None
+                try:
+                    media_service.mark_media_processing(db, media)
+                    temp_path = storage.download_to_temp(media.original_object_key)
+                    result = provider.analyze_image(
+                        str(temp_path),
+                        event_context=event_context,
+                    )
+                    analysis_service.upsert_ai_analysis(
+                        db,
+                        media_id=media.id,
+                        result=result,
+                        model_provider=provider.provider_name,
+                        model_name=provider.model_name,
+                        raw_response=result.model_dump(),
+                        commit=False,
+                    )
+                    if result.needs_review:
+                        review_service.create_pending_review_decision(
+                            db,
+                            media_id=media.id,
+                            review_reasons=result.review_reasons,
+                            commit=False,
+                        )
+                        media_service.mark_media_needs_review(
+                            db,
+                            media,
+                            reason=", ".join(result.review_reasons) or "needs_review",
+                            commit=False,
+                        )
+                        db.commit()
+                        needs_review_count += 1
+                    else:
+                        media_service.mark_media_processed(db, media, commit=False)
+                        db.commit()
+                        processed_files += 1
+                except Exception as media_exc:
+                    db.rollback()
+                    failed_files += 1
+                    media_service.mark_media_failed(db, media, str(media_exc))
+                finally:
+                    if temp_path is not None:
+                        try:
+                            temp_path.unlink(missing_ok=True)
+                        except OSError:
+                            pass
+
+            job_service.mark_job_finished(
+                db,
+                job,
+                processed_files=processed_files,
+                failed_files=failed_files,
+                needs_review_count=needs_review_count,
+            )
         except Exception as exc:
             db.rollback()
             media_service.mark_batch_media_failed(db, job.id, str(exc))

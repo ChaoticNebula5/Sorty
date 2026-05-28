@@ -56,6 +56,50 @@ def mark_job_completed(db: Session, job: BatchJob) -> BatchJob:
     return job
 
 
+def mark_job_partial_failed(
+    db: Session,
+    job: BatchJob,
+    processed_files: int,
+    failed_files: int,
+    error_message: str,
+) -> BatchJob:
+    job.status = "partial_failed"
+    job.processed_files = processed_files
+    job.failed_files = failed_files
+    job.error_message = error_message
+    job.completed_at = datetime.now(UTC)
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+def mark_job_finished(
+    db: Session,
+    job: BatchJob,
+    processed_files: int,
+    failed_files: int,
+    needs_review_count: int,
+) -> BatchJob:
+    job.processed_files = processed_files
+    job.failed_files = failed_files
+    job.needs_review_count = needs_review_count
+    job.completed_at = datetime.now(UTC)
+
+    if failed_files:
+        job.status = "partial_failed"
+        job.error_message = "One or more media assets failed processing."
+    elif needs_review_count:
+        job.status = "waiting_for_review"
+        job.error_message = None
+    else:
+        job.status = "completed"
+        job.error_message = None
+
+    db.commit()
+    db.refresh(job)
+    return job
+
+
 def mark_job_failed(db: Session, job: BatchJob, error_message: str) -> BatchJob:
     job.status = "failed"
     job.failed_files = job.total_files

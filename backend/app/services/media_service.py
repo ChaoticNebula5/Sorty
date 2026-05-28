@@ -92,6 +92,53 @@ def mark_batch_media_processing(db: Session, batch_job_id: uuid.UUID) -> None:
     db.commit()
 
 
+def mark_media_processing(db: Session, media: MediaAsset) -> MediaAsset:
+    media.processing_status = "processing"
+    media.processing_error = None
+    db.commit()
+    db.refresh(media)
+    return media
+
+
+def mark_media_processed(
+    db: Session,
+    media: MediaAsset,
+    commit: bool = True,
+) -> MediaAsset:
+    media.processing_status = "processed"
+    media.processing_error = None
+    if commit:
+        db.commit()
+        db.refresh(media)
+    return media
+
+
+def mark_media_needs_review(
+    db: Session,
+    media: MediaAsset,
+    reason: str | None = None,
+    commit: bool = True,
+) -> MediaAsset:
+    media.processing_status = "needs_review"
+    media.processing_error = reason
+    if commit:
+        db.commit()
+        db.refresh(media)
+    return media
+
+
+def mark_media_failed(
+    db: Session,
+    media: MediaAsset,
+    error_message: str,
+) -> MediaAsset:
+    media.processing_status = "failed"
+    media.processing_error = error_message
+    db.commit()
+    db.refresh(media)
+    return media
+
+
 def mark_batch_media_processed(db: Session, batch_job_id: uuid.UUID) -> None:
     media_assets = list(
         db.scalars(select(MediaAsset).where(MediaAsset.batch_job_id == batch_job_id))
@@ -131,6 +178,22 @@ def list_event_media(
             .order_by(MediaAsset.created_at.desc())
             .limit(limit)
             .offset(offset)
+        )
+    )
+
+
+def list_batch_media(
+    db: Session,
+    batch_job_id: uuid.UUID,
+    media_ids: list[uuid.UUID] | None = None,
+) -> list[MediaAsset]:
+    statement = select(MediaAsset).where(MediaAsset.batch_job_id == batch_job_id)
+    if media_ids is not None:
+        statement = statement.where(MediaAsset.id.in_(media_ids))
+
+    return list(
+        db.scalars(
+            statement.order_by(MediaAsset.created_at.asc(), MediaAsset.id.asc())
         )
     )
 

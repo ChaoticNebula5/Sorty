@@ -40,6 +40,34 @@ def test_mark_job_failed_updates_failed_file_count() -> None:
     assert db.refreshed is True
 
 
+def test_mark_job_partial_failed_updates_progress_counts() -> None:
+    db = FakeDb()
+    job = SimpleNamespace(
+        status="processing",
+        processed_files=0,
+        failed_files=0,
+        error_message=None,
+        completed_at=None,
+    )
+
+    result = job_service.mark_job_partial_failed(
+        db,
+        job,
+        processed_files=2,
+        failed_files=1,
+        error_message="some media failed",
+    )
+
+    assert result is job
+    assert job.status == "partial_failed"
+    assert job.processed_files == 2
+    assert job.failed_files == 1
+    assert job.error_message == "some media failed"
+    assert job.completed_at is not None
+    assert db.committed is True
+    assert db.refreshed is True
+
+
 def test_list_event_jobs_uses_deterministic_ordering() -> None:
     captured = {}
 
