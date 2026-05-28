@@ -110,6 +110,14 @@ def mark_job_failed(db: Session, job: BatchJob, error_message: str) -> BatchJob:
     return job
 
 
+def mark_job_reviewed_if_complete(db: Session, job: BatchJob) -> BatchJob:
+    job.status = "reviewed"
+    job.needs_review_count = 0
+    db.commit()
+    db.refresh(job)
+    return job
+
+
 def get_batch_job(db: Session, job_id: uuid.UUID) -> BatchJob | None:
     return db.scalar(select(BatchJob).where(BatchJob.id == job_id))
 
