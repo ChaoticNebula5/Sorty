@@ -200,7 +200,7 @@ def test_resume_job_enqueues_resume(monkeypatch) -> None:
         job.status = "reviewed"
         return job
 
-    def fake_mark_queued(db, job, rq_job_id):
+    def fake_claim_job_for_resume(db, job_id, rq_job_id):
         job.status = "queued"
         job.current_rq_job_id = rq_job_id
         return job
@@ -217,9 +217,8 @@ def test_resume_job_enqueues_resume(monkeypatch) -> None:
         lambda db, batch_job_id: 0,
     )
     monkeypatch.setattr(job_service, "mark_job_reviewed_if_complete", fake_mark_reviewed)
-    monkeypatch.setattr(job_service, "claim_job_for_resume", lambda db, job: job)
+    monkeypatch.setattr(job_service, "claim_job_for_resume", fake_claim_job_for_resume)
     monkeypatch.setattr(queue_service, "enqueue_batch_resume", fake_enqueue_batch_resume)
-    monkeypatch.setattr(job_service, "mark_job_review_resume_queued", fake_mark_queued)
     app.dependency_overrides[get_db] = override_db
 
     try:
@@ -261,7 +260,7 @@ def test_resume_job_handles_failed_claim(monkeypatch) -> None:
     monkeypatch.setattr(
         job_service,
         "claim_job_for_resume",
-        lambda db, job: (_ for _ in ()).throw(ValueError("already claimed")),
+        lambda db, job_id, rq_job_id: (_ for _ in ()).throw(ValueError("already claimed")),
     )
     app.dependency_overrides[get_db] = override_db
 
@@ -297,7 +296,6 @@ def test_resume_job_rejects_duplicate_queued_resume(monkeypatch) -> None:
 
 def test_resume_job_marks_failed_when_queue_unavailable(monkeypatch) -> None:
     job = make_job(status="reviewed")
-    retryable = []
 
     def fake_enqueue_batch_resume(job_id, event_id, thread_id):
         raise RuntimeError("redis down")
@@ -314,12 +312,7 @@ def test_resume_job_marks_failed_when_queue_unavailable(monkeypatch) -> None:
         lambda db, batch_job_id: 0,
     )
     monkeypatch.setattr(queue_service, "enqueue_batch_resume", fake_enqueue_batch_resume)
-    monkeypatch.setattr(job_service, "claim_job_for_resume", lambda db, job: job)
-    monkeypatch.setattr(
-        job_service,
-        "mark_job_resume_enqueue_failed",
-        lambda db, job: retryable.append(job.id),
-    )
+    monkeypatch.setattr(job_service, "claim_job_for_resume", lambda db, job_id, rq_job_id: job)
     app.dependency_overrides[get_db] = override_db
 
     try:
@@ -331,5 +324,46 @@ def test_resume_job_marks_failed_when_queue_unavailable(monkeypatch) -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 503
-    assert response.json()["error"]["code"] == "queue_unavailable"
-    assert retryable == [job.id]
+    body = response.json()
+    assert body["error"]["code"] == "queue_unavailable"
+    assert body["error"]["details"]["retryable"] is True
+    assert body["error"]["details"]["rq_job_id"] == (
+        f"resume:{job.id}:{job.langgraph_thread_id}"
+    )
+
+
+def test_resume_job_retries_already_claimed_resume(monkeypatch) -> None:
+    job = make_job(status="queued")
+    job.current_rq_job_id = f"resume:{job.id}:{job.langgraph_thread_id}"
+    enqueued = []
+
+    monkeypatch.setattr(job_service, "get_batch_job", lambda db, job_id: job)
+    monkeypatch.setattr(
+        review_service,
+        "count_pending_reviews_for_batch",
+        lambda db, batch_job_id: 0,
+    )
+    monkeypatch.setattr(
+        review_service,
+        "count_invalid_resolved_reviews_for_batch",
+        lambda db, batch_job_id: 0,
+    )
+    monkeypatch.setattr(
+        queue_service,
+        "enqueue_batch_resume",
+        lambda job_id, event_id, thread_id: enqueued.append(job_id)
+        or job.current_rq_job_id,
+    )
+    app.dependency_overrides[get_db] = override_db
+
+    try:
+        response = TestClient(app).post(
+            f"/api/jobs/{job.id}/resume",
+            headers=auth_headers(),
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()["data"]["rq_job_id"] == job.current_rq_job_id
+    assert enqueued == [job.id]

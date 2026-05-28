@@ -113,30 +113,34 @@ def process_batch_job(payload: dict[str, Any]) -> str:
 
 def resume_batch_job(payload: dict[str, Any]) -> str:
     job_id = uuid.UUID(str(payload["job_id"]))
-    event_id = uuid.UUID(str(payload["event_id"]))
-    thread_id = str(payload["thread_id"])
-
-    if payload.get("mode") != "resume":
-        raise ValueError("Resume task payload must use mode='resume'.")
+    job = None
 
     with SessionLocal() as db:
-        job = job_service.get_batch_job(db, job_id)
-        if job is None:
-            raise ValueError(f"Batch job not found: {job_id}")
-        if job.event_id != event_id:
-            raise ValueError("Resume task event_id does not match batch job.")
-        if job.langgraph_thread_id != thread_id:
-            raise ValueError("Resume task thread_id does not match batch job.")
-        if job.status != "queued":
-            raise ValueError(f"Cannot resume job with status: {job.status}")
-
         try:
+            job = job_service.get_batch_job(db, job_id)
+            if job is None:
+                raise ValueError(f"Batch job not found: {job_id}")
+
+            event_id = uuid.UUID(str(payload["event_id"]))
+            thread_id = str(payload["thread_id"])
+
+            if payload.get("mode") != "resume":
+                raise ValueError("Resume task payload must use mode='resume'.")
+
+            if job.event_id != event_id:
+                raise ValueError("Resume task event_id does not match batch job.")
+            if job.langgraph_thread_id != thread_id:
+                raise ValueError("Resume task thread_id does not match batch job.")
+            if job.status != "queued":
+                raise ValueError(f"Cannot resume job with status: {job.status}")
+
             job_service.mark_job_processing(db, job)
             resume_reviewed_batch(thread_id=thread_id, job_id=str(job_id))
-            job_service.mark_job_completed(db, job)
+            job_service.mark_job_resume_placeholder_done(db, job)
         except Exception as exc:
             db.rollback()
-            job_service.mark_job_failed(db, job, str(exc))
+            if job is not None and job.status in {"queued", "processing"}:
+                job_service.mark_job_resume_enqueue_failed(db, job)
             raise
 
     return str(job_id)

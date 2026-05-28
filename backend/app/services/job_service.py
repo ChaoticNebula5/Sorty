@@ -1,7 +1,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from app.db.models import BatchJob
@@ -39,13 +39,39 @@ def mark_job_queued(db: Session, job: BatchJob, rq_job_id: str) -> BatchJob:
     return job
 
 
-def claim_job_for_resume(db: Session, job: BatchJob) -> BatchJob:
-    if job.status != "reviewed":
+def claim_job_for_resume(
+    db: Session,
+    job_id: uuid.UUID,
+    rq_job_id: str,
+) -> BatchJob:
+    result = db.execute(
+        update(BatchJob)
+        .where(BatchJob.id == job_id, BatchJob.status == "reviewed")
+        .values(
+            status="queued",
+            current_rq_job_id=rq_job_id,
+            error_message=None,
+        )
+        .returning(BatchJob.id)
+    )
+    claimed_id = result.scalar_one_or_none()
+    if claimed_id is None:
+        db.rollback()
         raise ValueError("Only reviewed jobs can be claimed for resume.")
 
-    job.status = "queued"
-    job.current_rq_job_id = "resume-pending"
-    job.error_message = None
+    db.commit()
+
+    job = get_batch_job(db, job_id)
+    if job is None:
+        raise ValueError("Claimed resume job could not be reloaded.")
+
+    return job
+
+
+def mark_job_resume_placeholder_done(db: Session, job: BatchJob) -> BatchJob:
+    job.status = "reviewed"
+    job.current_rq_job_id = None
+    job.error_message = "Resume graph placeholder completed; finalization not implemented."
     db.commit()
     db.refresh(job)
     return job

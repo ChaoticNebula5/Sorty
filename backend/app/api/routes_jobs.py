@@ -50,12 +50,20 @@ def resume_job(
             },
         )
 
-    if job.status not in {"waiting_for_review", "reviewed"}:
+    resume_rq_job_id = queue_service.build_resume_rq_job_id(
+        job_id=job.id,
+        thread_id=job.langgraph_thread_id,
+    )
+    is_claimed_resume = (
+        job.status == "queued" and job.current_rq_job_id == resume_rq_job_id
+    )
+
+    if job.status not in {"waiting_for_review", "reviewed"} and not is_claimed_resume:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail={
                 "code": "invalid_job_status",
-                "message": "Only reviewed jobs can be resumed.",
+                "message": "Only reviewed or already claimed resume jobs can be resumed.",
                 "details": {"job_id": str(job_id), "status": job.status},
             },
         )
@@ -85,17 +93,20 @@ def resume_job(
     if job.status == "waiting_for_review":
         job = job_service.mark_job_reviewed_if_complete(db, job)
 
-    try:
-        claimed_job = job_service.claim_job_for_resume(db, job)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={
-                "code": "invalid_job_status",
-                "message": str(exc),
-                "details": {"job_id": str(job_id), "status": job.status},
-            },
-        ) from exc
+    if is_claimed_resume:
+        claimed_job = job
+    else:
+        try:
+            claimed_job = job_service.claim_job_for_resume(db, job.id, resume_rq_job_id)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "invalid_job_status",
+                    "message": str(exc),
+                    "details": {"job_id": str(job_id), "status": job.status},
+                },
+            ) from exc
 
     try:
         rq_job_id = queue_service.enqueue_batch_resume(
@@ -104,23 +115,25 @@ def resume_job(
             thread_id=claimed_job.langgraph_thread_id,
         )
     except Exception as exc:
-        job_service.mark_job_resume_enqueue_failed(db, claimed_job)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={
                 "code": "queue_unavailable",
                 "message": "Could not enqueue resume job.",
-                "details": {"job_id": str(job_id)},
+                "details": {
+                    "job_id": str(job_id),
+                    "rq_job_id": resume_rq_job_id,
+                    "retryable": True,
+                },
             },
         ) from exc
 
-    queued_job = job_service.mark_job_review_resume_queued(db, claimed_job, rq_job_id)
     return APIResponse(
         data=JobResumeResponse(
-            job_id=queued_job.id,
-            status=queued_job.status,
+            job_id=claimed_job.id,
+            status=claimed_job.status,
             rq_job_id=rq_job_id,
-            thread_id=queued_job.langgraph_thread_id,
+            thread_id=claimed_job.langgraph_thread_id,
             message="Resume job queued.",
         ),
         error=None,

@@ -24,6 +24,9 @@ class FakeSession:
     def commit(self) -> None:
         self.committed = True
 
+    def refresh(self, item: object) -> None:
+        return None
+
 
 class FakeStorage:
     def __init__(self, temp_path) -> None:
@@ -364,7 +367,7 @@ def test_process_batch_job_raises_for_missing_job(monkeypatch) -> None:
         tasks.process_batch_job({"job_id": str(job_id)})
 
 
-def test_resume_batch_job_marks_completed(monkeypatch) -> None:
+def test_resume_batch_job_marks_placeholder_done(monkeypatch) -> None:
     fake_db = FakeSession()
     job = SimpleNamespace(
         id=uuid.uuid4(),
@@ -388,8 +391,8 @@ def test_resume_batch_job_marks_completed(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         tasks.job_service,
-        "mark_job_completed",
-        lambda db, job: calls.append("completed"),
+        "mark_job_resume_placeholder_done",
+        lambda db, job: calls.append("placeholder_done"),
     )
 
     result = tasks.resume_batch_job(
@@ -402,7 +405,7 @@ def test_resume_batch_job_marks_completed(monkeypatch) -> None:
     )
 
     assert result == str(job.id)
-    assert calls == ["processing", f"graph:thread-1:{job.id}", "completed"]
+    assert calls == ["processing", f"graph:thread-1:{job.id}", "placeholder_done"]
 
 
 def test_resume_batch_job_marks_failed_on_error(monkeypatch) -> None:
@@ -423,8 +426,8 @@ def test_resume_batch_job_marks_failed_on_error(monkeypatch) -> None:
     monkeypatch.setattr(tasks.job_service, "mark_job_processing", fail_processing)
     monkeypatch.setattr(
         tasks.job_service,
-        "mark_job_failed",
-        lambda db, job, error_message: calls.append(error_message),
+        "mark_job_resume_enqueue_failed",
+        lambda db, job: calls.append("retryable"),
     )
 
     with pytest.raises(RuntimeError):
@@ -438,7 +441,7 @@ def test_resume_batch_job_marks_failed_on_error(monkeypatch) -> None:
         )
 
     assert fake_db.rolled_back is True
-    assert calls == ["resume failed"]
+    assert calls == ["retryable"]
 
 
 def test_resume_batch_job_rejects_wrong_thread_id(monkeypatch) -> None:
@@ -463,14 +466,68 @@ def test_resume_batch_job_rejects_wrong_thread_id(monkeypatch) -> None:
             }
         )
 
+    assert fake_db.rolled_back is True
 
-def test_resume_batch_job_rejects_wrong_mode(monkeypatch) -> None:
+
+def test_resume_batch_job_wrong_thread_restores_retryable_state(monkeypatch) -> None:
+    fake_db = FakeSession()
+    job = SimpleNamespace(
+        id=uuid.uuid4(),
+        event_id=uuid.uuid4(),
+        langgraph_thread_id="thread-1",
+        status="queued",
+    )
+    calls: list[str] = []
+
+    monkeypatch.setattr(tasks, "SessionLocal", lambda: fake_db)
+    monkeypatch.setattr(tasks.job_service, "get_batch_job", lambda db, job_id: job)
+    monkeypatch.setattr(
+        tasks.job_service,
+        "mark_job_resume_enqueue_failed",
+        lambda db, job: calls.append("retryable"),
+    )
+
     with pytest.raises(ValueError):
         tasks.resume_batch_job(
             {
-                "job_id": str(uuid.uuid4()),
-                "event_id": str(uuid.uuid4()),
-                "thread_id": "thread-1",
+                "job_id": str(job.id),
+                "event_id": str(job.event_id),
+                "thread_id": "wrong-thread",
+                "mode": "resume",
+            }
+        )
+
+    assert fake_db.rolled_back is True
+    assert calls == ["retryable"]
+
+
+def test_resume_batch_job_rejects_wrong_mode(monkeypatch) -> None:
+    fake_db = FakeSession()
+    job = SimpleNamespace(
+        id=uuid.uuid4(),
+        event_id=uuid.uuid4(),
+        langgraph_thread_id="thread-1",
+        status="queued",
+    )
+    calls: list[str] = []
+
+    monkeypatch.setattr(tasks, "SessionLocal", lambda: fake_db)
+    monkeypatch.setattr(tasks.job_service, "get_batch_job", lambda db, job_id: job)
+    monkeypatch.setattr(
+        tasks.job_service,
+        "mark_job_resume_enqueue_failed",
+        lambda db, job: calls.append("retryable"),
+    )
+
+    with pytest.raises(ValueError):
+        tasks.resume_batch_job(
+            {
+                "job_id": str(job.id),
+                "event_id": str(job.event_id),
+                "thread_id": job.langgraph_thread_id,
                 "mode": "start",
             }
         )
+
+    assert fake_db.rolled_back is True
+    assert calls == ["retryable"]

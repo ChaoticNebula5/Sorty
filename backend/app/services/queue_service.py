@@ -8,6 +8,37 @@ from app.core.config import get_settings
 from worker.tasks import process_batch_job, resume_batch_job
 
 
+def build_resume_rq_job_id(job_id: uuid.UUID, thread_id: str) -> str:
+    return f"resume:{job_id}:{thread_id}"
+
+
+def _get_rq_job_status(job: object) -> str | None:
+    get_status = getattr(job, "get_status", None)
+    if callable(get_status):
+        status = get_status(refresh=False)
+    else:
+        status = getattr(job, "status", None)
+
+    if status is None:
+        return None
+
+    value = getattr(status, "value", None)
+    if value is not None:
+        return str(value)
+
+    return str(status)
+
+
+def _is_reusable_resume_job(job: object) -> bool:
+    return _get_rq_job_status(job) in {"queued", "started", "deferred", "scheduled"}
+
+
+def _delete_rq_job_if_possible(job: object) -> None:
+    delete = getattr(job, "delete", None)
+    if callable(delete):
+        delete()
+
+
 def enqueue_batch_processing(
     job_id: uuid.UUID,
     event_id: uuid.UUID,
@@ -40,5 +71,23 @@ def enqueue_batch_resume(
         "thread_id": thread_id,
         "mode": "resume",
     }
-    rq_job = queue.enqueue(resume_batch_job, payload)
+    rq_job_id = build_resume_rq_job_id(job_id, thread_id)
+    existing_job = queue.fetch_job(rq_job_id)
+    if existing_job is not None and _is_reusable_resume_job(existing_job):
+        return rq_job_id
+    if existing_job is not None:
+        _delete_rq_job_if_possible(existing_job)
+
+    try:
+        rq_job = queue.enqueue(
+            resume_batch_job,
+            payload,
+            job_id=rq_job_id,
+        )
+    except Exception:
+        existing_job = queue.fetch_job(rq_job_id)
+        if existing_job is not None and _is_reusable_resume_job(existing_job):
+            return rq_job_id
+        raise
+
     return rq_job.id
