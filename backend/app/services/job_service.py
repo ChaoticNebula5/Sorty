@@ -39,6 +39,39 @@ def mark_job_queued(db: Session, job: BatchJob, rq_job_id: str) -> BatchJob:
     return job
 
 
+def claim_job_for_resume(db: Session, job: BatchJob) -> BatchJob:
+    if job.status != "reviewed":
+        raise ValueError("Only reviewed jobs can be claimed for resume.")
+
+    job.status = "queued"
+    job.current_rq_job_id = "resume-pending"
+    job.error_message = None
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+def mark_job_resume_enqueue_failed(db: Session, job: BatchJob) -> BatchJob:
+    job.status = "reviewed"
+    job.current_rq_job_id = None
+    job.error_message = "Could not enqueue resume job."
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+def mark_job_review_resume_queued(
+    db: Session,
+    job: BatchJob,
+    rq_job_id: str,
+) -> BatchJob:
+    job.current_rq_job_id = rq_job_id
+    job.error_message = None
+    db.commit()
+    db.refresh(job)
+    return job
+
+
 def mark_job_processing(db: Session, job: BatchJob) -> BatchJob:
     job.status = "processing"
     job.started_at = datetime.now(UTC)

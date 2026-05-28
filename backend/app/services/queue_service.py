@@ -5,7 +5,7 @@ import redis
 from rq import Queue
 
 from app.core.config import get_settings
-from worker.tasks import process_batch_job
+from worker.tasks import process_batch_job, resume_batch_job
 
 
 def enqueue_batch_processing(
@@ -23,4 +23,22 @@ def enqueue_batch_processing(
         "mode": "start",
     }
     rq_job = queue.enqueue(process_batch_job, payload)
+    return rq_job.id
+
+
+def enqueue_batch_resume(
+    job_id: uuid.UUID,
+    event_id: uuid.UUID,
+    thread_id: str,
+) -> str:
+    settings = get_settings()
+    connection = redis.from_url(settings.redis_url)
+    queue = Queue(settings.rq_queue_name, connection=connection)
+    payload: dict[str, Any] = {
+        "job_id": str(job_id),
+        "event_id": str(event_id),
+        "thread_id": thread_id,
+        "mode": "resume",
+    }
+    rq_job = queue.enqueue(resume_batch_job, payload)
     return rq_job.id

@@ -20,3 +20,11 @@ class BatchJobRead(BaseModel):
     error_message: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class JobResumeResponse(BaseModel):
+    job_id: uuid.UUID
+    status: str
+    rq_job_id: str
+    thread_id: str
+    message: str

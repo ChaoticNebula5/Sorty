@@ -112,6 +112,34 @@ def count_pending_reviews_for_batch(db: Session, batch_job_id: uuid.UUID) -> int
     ) or 0
 
 
+def count_invalid_resolved_reviews_for_batch(db: Session, batch_job_id: uuid.UUID) -> int:
+    decisions = list(
+        db.scalars(
+            select(ReviewDecision)
+            .join(ReviewDecision.media)
+            .where(
+                MediaAsset.batch_job_id == batch_job_id,
+                ReviewDecision.status != "pending",
+            )
+        )
+    )
+
+    invalid_count = 0
+    for decision in decisions:
+        if decision.status in {"approved", "edited"} and not decision.final_primary_folder:
+            invalid_count += 1
+        if decision.status in {"rejected", "duplicate"} and decision.include_in_export:
+            invalid_count += 1
+        if decision.status in {"rejected", "duplicate"} and (
+            decision.final_primary_folder
+            or decision.final_sub_folder
+            or decision.final_tags
+        ):
+            invalid_count += 1
+
+    return invalid_count
+
+
 def get_review_batch_job(db: Session, decision: ReviewDecision) -> BatchJob | None:
     media = decision.media
     if media is None or media.batch_job_id is None:

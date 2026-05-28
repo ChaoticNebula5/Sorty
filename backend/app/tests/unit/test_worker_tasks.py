@@ -362,3 +362,115 @@ def test_process_batch_job_raises_for_missing_job(monkeypatch) -> None:
 
     with pytest.raises(ValueError):
         tasks.process_batch_job({"job_id": str(job_id)})
+
+
+def test_resume_batch_job_marks_completed(monkeypatch) -> None:
+    fake_db = FakeSession()
+    job = SimpleNamespace(
+        id=uuid.uuid4(),
+        event_id=uuid.uuid4(),
+        langgraph_thread_id="thread-1",
+        status="queued",
+    )
+    calls: list[str] = []
+
+    monkeypatch.setattr(tasks, "SessionLocal", lambda: fake_db)
+    monkeypatch.setattr(tasks.job_service, "get_batch_job", lambda db, job_id: job)
+    monkeypatch.setattr(
+        tasks.job_service,
+        "mark_job_processing",
+        lambda db, job: calls.append("processing"),
+    )
+    monkeypatch.setattr(
+        tasks,
+        "resume_reviewed_batch",
+        lambda thread_id, job_id: calls.append(f"graph:{thread_id}:{job_id}"),
+    )
+    monkeypatch.setattr(
+        tasks.job_service,
+        "mark_job_completed",
+        lambda db, job: calls.append("completed"),
+    )
+
+    result = tasks.resume_batch_job(
+        {
+            "job_id": str(job.id),
+            "event_id": str(job.event_id),
+            "thread_id": job.langgraph_thread_id,
+            "mode": "resume",
+        }
+    )
+
+    assert result == str(job.id)
+    assert calls == ["processing", f"graph:thread-1:{job.id}", "completed"]
+
+
+def test_resume_batch_job_marks_failed_on_error(monkeypatch) -> None:
+    fake_db = FakeSession()
+    job = SimpleNamespace(
+        id=uuid.uuid4(),
+        event_id=uuid.uuid4(),
+        langgraph_thread_id="thread-1",
+        status="queued",
+    )
+    calls: list[str] = []
+
+    def fail_processing(db, job):
+        raise RuntimeError("resume failed")
+
+    monkeypatch.setattr(tasks, "SessionLocal", lambda: fake_db)
+    monkeypatch.setattr(tasks.job_service, "get_batch_job", lambda db, job_id: job)
+    monkeypatch.setattr(tasks.job_service, "mark_job_processing", fail_processing)
+    monkeypatch.setattr(
+        tasks.job_service,
+        "mark_job_failed",
+        lambda db, job, error_message: calls.append(error_message),
+    )
+
+    with pytest.raises(RuntimeError):
+        tasks.resume_batch_job(
+            {
+                "job_id": str(job.id),
+                "event_id": str(job.event_id),
+                "thread_id": job.langgraph_thread_id,
+                "mode": "resume",
+            }
+        )
+
+    assert fake_db.rolled_back is True
+    assert calls == ["resume failed"]
+
+
+def test_resume_batch_job_rejects_wrong_thread_id(monkeypatch) -> None:
+    fake_db = FakeSession()
+    job = SimpleNamespace(
+        id=uuid.uuid4(),
+        event_id=uuid.uuid4(),
+        langgraph_thread_id="thread-1",
+        status="queued",
+    )
+
+    monkeypatch.setattr(tasks, "SessionLocal", lambda: fake_db)
+    monkeypatch.setattr(tasks.job_service, "get_batch_job", lambda db, job_id: job)
+
+    with pytest.raises(ValueError):
+        tasks.resume_batch_job(
+            {
+                "job_id": str(job.id),
+                "event_id": str(job.event_id),
+                "thread_id": "wrong-thread",
+                "mode": "resume",
+            }
+        )
+
+
+def test_resume_batch_job_rejects_wrong_mode(monkeypatch) -> None:
+    with pytest.raises(ValueError):
+        tasks.resume_batch_job(
+            {
+                "job_id": str(uuid.uuid4()),
+                "event_id": str(uuid.uuid4()),
+                "thread_id": "thread-1",
+                "mode": "start",
+            }
+        )
