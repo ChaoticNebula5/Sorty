@@ -99,6 +99,34 @@ def should_include_media_in_export(
     return review.status in {"approved", "edited"} and review.include_in_export
 
 
+def is_pending_review_media(media: MediaAsset) -> bool:
+    review = media.review_decision
+    return review is None or review.status == "pending"
+
+
+def build_archive_path(media: MediaAsset, index: int) -> str:
+    review = media.review_decision
+    analysis = media.ai_analysis
+
+    if is_pending_review_media(media):
+        primary_folder = "Needs_Review"
+        sub_folder = "General"
+    else:
+        primary_folder = sanitize_zip_segment(
+            getattr(review, "final_primary_folder", None)
+            or getattr(analysis, "suggested_primary_folder", None),
+            "Unsorted",
+        )
+        sub_folder = sanitize_zip_segment(
+            getattr(review, "final_sub_folder", None)
+            or getattr(analysis, "suggested_sub_folder", None),
+            "General",
+        )
+
+    filename = sanitize_zip_segment(media.original_filename, f"media-{index}")
+    return f"{primary_folder}/{sub_folder}/{index:04d}-{filename}"
+
+
 def build_export_zip_bytes(
     event: Event,
     media_items: list[MediaAsset],
@@ -111,19 +139,7 @@ def build_export_zip_bytes(
         for index, media in enumerate(media_items, start=1):
             review = media.review_decision
             analysis = media.ai_analysis
-
-            primary_folder = sanitize_zip_segment(
-                getattr(review, "final_primary_folder", None)
-                or getattr(analysis, "suggested_primary_folder", None),
-                "Unsorted",
-            )
-            sub_folder = sanitize_zip_segment(
-                getattr(review, "final_sub_folder", None)
-                or getattr(analysis, "suggested_sub_folder", None),
-                "General",
-            )
-            filename = sanitize_zip_segment(media.original_filename, f"media-{index}")
-            archive_path = f"{primary_folder}/{sub_folder}/{index:04d}-{filename}"
+            archive_path = build_archive_path(media, index)
 
             archive.writestr(archive_path, storage.get_bytes(media.original_object_key))
             metadata_rows.append(
@@ -158,8 +174,20 @@ def build_metadata_csv(rows: list[dict[str, str]]) -> str:
     ]
     writer = csv.DictWriter(output, fieldnames=fieldnames)
     writer.writeheader()
-    writer.writerows(rows)
+    writer.writerows(
+        {
+            key: escape_csv_cell(value)
+            for key, value in row.items()
+        }
+        for row in rows
+    )
     return output.getvalue()
+
+
+def escape_csv_cell(value: str) -> str:
+    if value.startswith(("=", "+", "-", "@")):
+        return f"'{value}"
+    return value
 
 
 def build_summary_markdown(event: Event, included_count: int) -> str:

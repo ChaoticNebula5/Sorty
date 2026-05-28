@@ -69,6 +69,44 @@ def test_build_export_zip_bytes_adds_media_metadata_and_summary() -> None:
         assert "Cultural Fest" in archive.read("summary.md").decode()
 
 
+def test_build_export_zip_bytes_places_pending_media_under_needs_review() -> None:
+    event = SimpleNamespace(id=uuid.uuid4(), name="Cultural Fest")
+    media = make_media(
+        review_decision=SimpleNamespace(
+            status="pending",
+            include_in_export=False,
+            final_primary_folder=None,
+            final_sub_folder=None,
+            final_tags=[],
+        )
+    )
+    storage = FakeStorage()
+
+    zip_bytes = export_service.build_export_zip_bytes(event, [media], storage)
+
+    with zipfile.ZipFile(BytesIO(zip_bytes)) as archive:
+        assert "Needs_Review/General/0001-stage_photo_.jpg" in archive.namelist()
+
+
+def test_build_metadata_csv_escapes_spreadsheet_formulas() -> None:
+    csv_text = export_service.build_metadata_csv(
+        [
+            {
+                "media_id": "media-id",
+                "original_filename": "=cmd.jpg",
+                "archive_path": "Folder/file.jpg",
+                "review_status": "approved",
+                "caption": "+SUM(1,1)",
+                "tags": "@danger",
+            }
+        ]
+    )
+
+    assert "'=cmd.jpg" in csv_text
+    assert "'+SUM(1,1)" in csv_text
+    assert "'@danger" in csv_text
+
+
 def test_should_include_media_in_export_respects_review_statuses() -> None:
     approved = make_media()
     rejected = make_media(
