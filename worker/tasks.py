@@ -10,6 +10,7 @@ from app.services import (
     job_service,
     media_service,
     review_service,
+    search_service,
     storage_factory,
     vision_service,
 )
@@ -56,7 +57,7 @@ def process_batch_job(payload: dict[str, Any]) -> str:
                         str(temp_path),
                         event_context=event_context,
                     )
-                    analysis_service.upsert_ai_analysis(
+                    analysis = analysis_service.upsert_ai_analysis(
                         db,
                         media_id=media.id,
                         result=result,
@@ -65,6 +66,8 @@ def process_batch_job(payload: dict[str, Any]) -> str:
                         raw_response=result.model_dump(),
                         commit=False,
                     )
+                    media.ai_analysis = analysis
+                    search_service.upsert_media_embedding(db, media, commit=False)
                     if result.needs_review:
                         review_service.create_pending_review_decision(
                             db,
