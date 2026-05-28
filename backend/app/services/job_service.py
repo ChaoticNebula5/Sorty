@@ -1,7 +1,7 @@
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.db.models import BatchJob
@@ -70,11 +70,24 @@ def get_batch_job(db: Session, job_id: uuid.UUID) -> BatchJob | None:
     return db.scalar(select(BatchJob).where(BatchJob.id == job_id))
 
 
-def list_event_jobs(db: Session, event_id: uuid.UUID) -> list[BatchJob]:
+def list_event_jobs(
+    db: Session,
+    event_id: uuid.UUID,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[BatchJob]:
     return list(
         db.scalars(
             select(BatchJob)
             .where(BatchJob.event_id == event_id)
-            .order_by(BatchJob.created_at.desc())
+            .order_by(BatchJob.created_at.desc(), BatchJob.id.desc())
+            .limit(limit)
+            .offset(offset)
         )
     )
+
+
+def count_event_jobs(db: Session, event_id: uuid.UUID) -> int:
+    return db.scalar(
+        select(func.count()).select_from(BatchJob).where(BatchJob.event_id == event_id)
+    ) or 0

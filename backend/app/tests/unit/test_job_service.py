@@ -1,5 +1,9 @@
 from types import SimpleNamespace
+import uuid
 
+from sqlalchemy.dialects import postgresql
+
+from app.db.models import BatchJob
 from app.services import job_service
 
 
@@ -34,3 +38,28 @@ def test_mark_job_failed_updates_failed_file_count() -> None:
     assert job.completed_at is not None
     assert db.committed is True
     assert db.refreshed is True
+
+
+def test_list_event_jobs_uses_deterministic_ordering() -> None:
+    captured = {}
+
+    class FakeDb:
+        def scalars(self, statement):
+            captured["statement"] = statement
+            return []
+
+    event_id = uuid.uuid4()
+
+    result = job_service.list_event_jobs(FakeDb(), event_id, limit=10, offset=20)
+
+    compiled = str(
+        captured["statement"].compile(
+            dialect=postgresql.dialect(),
+            compile_kwargs={"literal_binds": True},
+        )
+    )
+    assert result == []
+    assert "ORDER BY batch_jobs.created_at DESC, batch_jobs.id DESC" in compiled
+    assert "LIMIT 10" in compiled
+    assert "OFFSET 20" in compiled
+    assert BatchJob.__tablename__ in compiled

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_db
-from app.api.routes_events import event_service
+from app.api.routes_events import event_service, job_service
 from app.core.config import get_settings
 from app.main import app
 
@@ -27,6 +27,27 @@ def make_event(**overrides: object) -> SimpleNamespace:
         "created_at": now,
         "updated_at": now,
         "archived_at": None,
+    }
+    data.update(overrides)
+    return SimpleNamespace(**data)
+
+
+def make_job(**overrides: object) -> SimpleNamespace:
+    now = datetime.now(UTC)
+    data = {
+        "id": uuid.uuid4(),
+        "event_id": uuid.uuid4(),
+        "current_rq_job_id": "rq-job-id",
+        "status": "queued",
+        "total_files": 2,
+        "processed_files": 0,
+        "failed_files": 0,
+        "needs_review_count": 0,
+        "started_at": None,
+        "completed_at": None,
+        "error_message": None,
+        "created_at": now,
+        "updated_at": now,
     }
     data.update(overrides)
     return SimpleNamespace(**data)
@@ -171,3 +192,73 @@ def test_get_event_returns_event(monkeypatch) -> None:
     assert body["error"] is None
     assert body["data"]["id"] == str(event.id)
     assert body["data"]["slug"] == "cultural-fest-2026"
+
+
+def test_list_event_jobs_requires_api_key() -> None:
+    response = TestClient(app).get(f"/api/events/{uuid.uuid4()}/jobs")
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "missing_api_key"
+
+
+def test_list_event_jobs_returns_pagination(monkeypatch) -> None:
+    event = make_event()
+    job = make_job(event_id=event.id)
+    captured: dict[str, int] = {}
+
+    monkeypatch.setattr(event_service, "get_event", lambda db, event_id: event)
+    monkeypatch.setattr(
+        job_service,
+        "list_event_jobs",
+        lambda db, event_id, limit=50, offset=0: captured.update(
+            {"limit": limit, "offset": offset}
+        )
+        or [job],
+    )
+    monkeypatch.setattr(job_service, "count_event_jobs", lambda db, event_id: 1)
+    app.dependency_overrides[get_db] = override_db
+
+    try:
+        response = TestClient(app).get(
+            f"/api/events/{event.id}/jobs?limit=10&offset=20",
+            headers=auth_headers(),
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["error"] is None
+    assert body["pagination"] == {"limit": 10, "offset": 20, "total": 1}
+    assert captured == {"limit": 10, "offset": 20}
+    assert body["data"][0]["id"] == str(job.id)
+    assert body["data"][0]["status"] == "queued"
+
+
+def test_list_event_jobs_rejects_invalid_pagination() -> None:
+    event_id = uuid.uuid4()
+
+    for query in ("limit=0", "limit=101", "offset=-1"):
+        response = TestClient(app).get(
+            f"/api/events/{event_id}/jobs?{query}",
+            headers=auth_headers(),
+        )
+
+        assert response.status_code == 422
+        assert response.json()["error"]["code"] == "validation_error"
+
+
+def test_list_event_jobs_returns_404_for_missing_event(monkeypatch) -> None:
+    monkeypatch.setattr(event_service, "get_event", lambda db, event_id: None)
+    app.dependency_overrides[get_db] = override_db
+
+    try:
+        response = TestClient(app).get(
+            f"/api/events/{uuid.uuid4()}/jobs",
+            headers=auth_headers(),
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "event_not_found"
