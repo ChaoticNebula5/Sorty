@@ -21,6 +21,22 @@ class FakeStorage:
         self.written[object_key] = (data, content_type)
 
 
+class FakeDb:
+    def __init__(self) -> None:
+        self.committed = False
+        self.refreshed = False
+        self.scalar_result = None
+
+    def scalar(self, statement):
+        return self.scalar_result
+
+    def commit(self) -> None:
+        self.committed = True
+
+    def refresh(self, item: object) -> None:
+        self.refreshed = True
+
+
 def make_media(**overrides: object) -> SimpleNamespace:
     media_id = uuid.uuid4()
     data = {
@@ -156,3 +172,35 @@ def test_create_export_blocks_pending_reviews(monkeypatch) -> None:
             payload=ExportCreateRequest(),
             storage=FakeStorage(),
         )
+
+
+def test_generate_export_archive_marks_failed_and_reraises(monkeypatch) -> None:
+    db = FakeDb()
+    db.scalar_result = SimpleNamespace(id=uuid.uuid4(), name="Event")
+    export_job = SimpleNamespace(
+        id=uuid.uuid4(),
+        event_id=db.scalar_result.id,
+        include_duplicates=False,
+        include_blurry=True,
+        include_pending=False,
+        zip_object_key="events/event-id/exports/export-id.zip",
+        status="exporting",
+        error_message=None,
+        completed_at=None,
+    )
+
+    monkeypatch.setattr(export_service, "list_export_candidates", lambda *args, **kwargs: [])
+    monkeypatch.setattr(
+        export_service,
+        "build_export_zip_bytes",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("zip failed")),
+    )
+
+    with pytest.raises(RuntimeError):
+        export_service.generate_export_archive(db, export_job, FakeStorage())
+
+    assert export_job.status == "failed"
+    assert export_job.error_message == "zip failed"
+    assert export_job.completed_at is not None
+    assert db.committed is True
+    assert db.refreshed is True

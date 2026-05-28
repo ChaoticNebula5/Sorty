@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_db, require_api_key
 from app.schemas.common import APIResponse
 from app.schemas.export import ExportCreateRequest, ExportJobRead
-from app.services import event_service, export_service, storage_factory
+from app.services import event_service, export_service, queue_service, storage_factory
 
 router = APIRouter(
     prefix="/api",
@@ -60,11 +60,10 @@ def create_event_export(
         )
 
     try:
-        export_job = export_service.create_and_generate_export(
+        export_job = export_service.create_export_job(
             db,
             event=event,
             payload=payload,
-            storage=storage_factory.get_storage_service(),
         )
     except export_service.ExportBlockedError as exc:
         raise HTTPException(
@@ -76,7 +75,26 @@ def create_event_export(
             },
         ) from exc
 
-    return APIResponse(data=export_job_to_read(export_job), error=None)
+    queued_export_job = export_service.mark_export_queued(db, export_job)
+
+    try:
+        queue_service.enqueue_export(queued_export_job.id)
+    except Exception as exc:
+        export_service.mark_export_failed(
+            db,
+            queued_export_job,
+            "Could not enqueue export job.",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "code": "queue_unavailable",
+                "message": "Could not enqueue export job.",
+                "details": {"export_id": str(queued_export_job.id)},
+            },
+        ) from exc
+
+    return APIResponse(data=export_job_to_read(queued_export_job), error=None)
 
 
 @router.get("/exports/{export_id}")

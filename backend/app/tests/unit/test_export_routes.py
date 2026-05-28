@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_db
-from app.api.routes_export import event_service, export_service, storage_factory
+from app.api.routes_export import event_service, export_service, queue_service, storage_factory
 from app.core.config import get_settings
 from app.main import app
 
@@ -67,12 +67,11 @@ def test_create_export_returns_404_for_missing_event(monkeypatch) -> None:
 def test_create_export_returns_conflict_when_blocked(monkeypatch) -> None:
     event_id = uuid.uuid4()
 
-    def fake_create_and_generate_export(db, event, payload, storage):
+    def fake_create_export_job(db, event, payload):
         raise export_service.ExportBlockedError("Export is blocked while review items are pending.")
 
     monkeypatch.setattr(event_service, "get_event", lambda db, event_id: object())
-    monkeypatch.setattr(storage_factory, "get_storage_service", lambda: object())
-    monkeypatch.setattr(export_service, "create_and_generate_export", fake_create_and_generate_export)
+    monkeypatch.setattr(export_service, "create_export_job", fake_create_export_job)
     app.dependency_overrides[get_db] = override_db
 
     try:
@@ -88,16 +87,22 @@ def test_create_export_returns_conflict_when_blocked(monkeypatch) -> None:
     assert response.json()["error"]["code"] == "export_blocked"
 
 
-def test_create_export_returns_completed_job(monkeypatch) -> None:
+def test_create_export_returns_queued_job(monkeypatch) -> None:
     event_id = uuid.uuid4()
-    export_job = make_export_job(event_id=event_id)
+    export_job = make_export_job(event_id=event_id, status="created")
+    queued_job = make_export_job(id=export_job.id, event_id=event_id, status="queued")
 
     monkeypatch.setattr(event_service, "get_event", lambda db, event_id: object())
-    monkeypatch.setattr(storage_factory, "get_storage_service", lambda: object())
     monkeypatch.setattr(
         export_service,
-        "create_and_generate_export",
-        lambda db, event, payload, storage: export_job,
+        "create_export_job",
+        lambda db, event, payload: export_job,
+    )
+    monkeypatch.setattr(queue_service, "enqueue_export", lambda export_id: "rq-export-id")
+    monkeypatch.setattr(
+        export_service,
+        "mark_export_queued",
+        lambda db, export_job: queued_job,
     )
     app.dependency_overrides[get_db] = override_db
 
@@ -114,7 +119,87 @@ def test_create_export_returns_completed_job(monkeypatch) -> None:
     body = response.json()
     assert body["error"] is None
     assert body["data"]["id"] == str(export_job.id)
-    assert body["data"]["download_url"] == f"/api/exports/{export_job.id}/download"
+    assert body["data"]["status"] == "queued"
+    assert body["data"]["download_url"] is None
+
+
+def test_create_export_marks_queued_before_enqueue(monkeypatch) -> None:
+    event_id = uuid.uuid4()
+    export_job = make_export_job(event_id=event_id, status="created")
+    queued_job = make_export_job(id=export_job.id, event_id=event_id, status="queued")
+    calls: list[str] = []
+
+    def fake_mark_export_queued(db, export_job):
+        calls.append("mark_queued")
+        return queued_job
+
+    def fake_enqueue_export(export_id):
+        calls.append("enqueue")
+        return "rq-export-id"
+
+    monkeypatch.setattr(event_service, "get_event", lambda db, event_id: object())
+    monkeypatch.setattr(
+        export_service,
+        "create_export_job",
+        lambda db, event, payload: export_job,
+    )
+    monkeypatch.setattr(export_service, "mark_export_queued", fake_mark_export_queued)
+    monkeypatch.setattr(queue_service, "enqueue_export", fake_enqueue_export)
+    app.dependency_overrides[get_db] = override_db
+
+    try:
+        response = TestClient(app).post(
+            f"/api/events/{event_id}/export",
+            headers=auth_headers(),
+            json={},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    assert calls == ["mark_queued", "enqueue"]
+
+
+def test_create_export_returns_503_when_queue_unavailable(monkeypatch) -> None:
+    event_id = uuid.uuid4()
+    export_job = make_export_job(event_id=event_id, status="created")
+    failed: list[str] = []
+
+    monkeypatch.setattr(event_service, "get_event", lambda db, event_id: object())
+    monkeypatch.setattr(
+        export_service,
+        "create_export_job",
+        lambda db, event, payload: export_job,
+    )
+    monkeypatch.setattr(
+        queue_service,
+        "enqueue_export",
+        lambda export_id: (_ for _ in ()).throw(RuntimeError("redis down")),
+    )
+    monkeypatch.setattr(
+        export_service,
+        "mark_export_queued",
+        lambda db, export_job: export_job,
+    )
+    monkeypatch.setattr(
+        export_service,
+        "mark_export_failed",
+        lambda db, export_job, error_message: failed.append(error_message),
+    )
+    app.dependency_overrides[get_db] = override_db
+
+    try:
+        response = TestClient(app).post(
+            f"/api/events/{event_id}/export",
+            headers=auth_headers(),
+            json={},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 503
+    assert response.json()["error"]["code"] == "queue_unavailable"
+    assert failed == ["Could not enqueue export job."]
 
 
 def test_download_export_returns_conflict_when_not_ready(monkeypatch) -> None:

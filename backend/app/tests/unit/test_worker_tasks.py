@@ -540,3 +540,67 @@ def test_resume_batch_job_rejects_wrong_mode(monkeypatch) -> None:
 
     assert fake_db.rolled_back is True
     assert calls == ["retryable"]
+
+
+def test_generate_export_job_runs_export_pipeline(monkeypatch) -> None:
+    fake_db = FakeSession()
+    export_job = SimpleNamespace(id=uuid.uuid4(), status="queued")
+    calls: list[str] = []
+
+    monkeypatch.setattr(tasks, "SessionLocal", lambda: fake_db)
+    monkeypatch.setattr(
+        tasks.export_service,
+        "get_export_job",
+        lambda db, export_id: export_job,
+    )
+    monkeypatch.setattr(
+        tasks.export_service,
+        "mark_export_exporting",
+        lambda db, export_job: calls.append("exporting"),
+    )
+    monkeypatch.setattr(tasks.storage_factory, "get_storage_service", lambda: object())
+    monkeypatch.setattr(
+        tasks.export_service,
+        "generate_export_archive",
+        lambda db, export_job, storage: calls.append("archive"),
+    )
+
+    result = tasks.generate_export_job(
+        {"export_id": str(export_job.id), "mode": "export"}
+    )
+
+    assert result == str(export_job.id)
+    assert calls == ["exporting", "archive"]
+
+
+def test_generate_export_job_marks_failed_on_error(monkeypatch) -> None:
+    fake_db = FakeSession()
+    export_job = SimpleNamespace(id=uuid.uuid4(), status="queued")
+    calls: list[str] = []
+
+    monkeypatch.setattr(tasks, "SessionLocal", lambda: fake_db)
+    monkeypatch.setattr(
+        tasks.export_service,
+        "get_export_job",
+        lambda db, export_id: export_job,
+    )
+    monkeypatch.setattr(tasks.export_service, "mark_export_exporting", lambda db, export_job: None)
+    monkeypatch.setattr(tasks.storage_factory, "get_storage_service", lambda: object())
+    monkeypatch.setattr(
+        tasks.export_service,
+        "generate_export_archive",
+        lambda db, export_job, storage: (_ for _ in ()).throw(RuntimeError("zip failed")),
+    )
+    monkeypatch.setattr(
+        tasks.export_service,
+        "mark_export_failed",
+        lambda db, export_job, error_message: calls.append(error_message),
+    )
+
+    with pytest.raises(RuntimeError):
+        tasks.generate_export_job(
+            {"export_id": str(export_job.id), "mode": "export"}
+        )
+
+    assert fake_db.rolled_back is True
+    assert calls == ["zip failed"]

@@ -5,7 +5,7 @@ import redis
 from rq import Queue
 
 from app.core.config import get_settings
-from worker.tasks import process_batch_job, resume_batch_job
+from worker.tasks import generate_export_job, process_batch_job, resume_batch_job
 
 
 def build_resume_rq_job_id(job_id: uuid.UUID, thread_id: str) -> str:
@@ -90,4 +90,16 @@ def enqueue_batch_resume(
             return rq_job_id
         raise
 
+    return rq_job.id
+
+
+def enqueue_export(export_id: uuid.UUID) -> str:
+    settings = get_settings()
+    connection = redis.from_url(settings.redis_url)
+    queue = Queue(settings.rq_queue_name, connection=connection)
+    payload: dict[str, Any] = {
+        "export_id": str(export_id),
+        "mode": "export",
+    }
+    rq_job = queue.enqueue(generate_export_job, payload)
     return rq_job.id

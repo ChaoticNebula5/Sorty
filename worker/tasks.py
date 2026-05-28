@@ -7,6 +7,7 @@ from app.db.session import SessionLocal
 from app.services import (
     analysis_service,
     event_service,
+    export_service,
     job_service,
     media_service,
     review_service,
@@ -147,3 +148,28 @@ def resume_batch_job(payload: dict[str, Any]) -> str:
             raise
 
     return str(job_id)
+
+
+def generate_export_job(payload: dict[str, Any]) -> str:
+    export_id = uuid.UUID(str(payload["export_id"]))
+
+    if payload.get("mode") != "export":
+        raise ValueError("Export task payload must use mode='export'.")
+
+    with SessionLocal() as db:
+        export_job = export_service.get_export_job(db, export_id)
+        if export_job is None:
+            raise ValueError(f"Export job not found: {export_id}")
+        if export_job.status not in {"created", "queued"}:
+            raise ValueError(f"Cannot generate export with status: {export_job.status}")
+
+        try:
+            export_service.mark_export_exporting(db, export_job)
+            storage = storage_factory.get_storage_service()
+            export_service.generate_export_archive(db, export_job, storage)
+        except Exception as exc:
+            db.rollback()
+            export_service.mark_export_failed(db, export_job, str(exc))
+            raise
+
+    return str(export_id)

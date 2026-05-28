@@ -208,6 +208,16 @@ def create_and_generate_export(
     payload: ExportCreateRequest,
     storage: StorageService,
 ) -> ExportJob:
+    export_job = create_export_job(db, event, payload)
+    generate_export_archive(db, export_job, storage)
+    return export_job
+
+
+def create_export_job(
+    db: Session,
+    event: Event,
+    payload: ExportCreateRequest,
+) -> ExportJob:
     if not payload.include_pending and count_pending_reviews(db, event.id) > 0:
         raise ExportBlockedError("Export is blocked while review items are pending.")
 
@@ -215,7 +225,7 @@ def create_and_generate_export(
     export_job = ExportJob(
         id=export_id,
         event_id=event.id,
-        status="exporting",
+        status="created",
         export_type="organized_zip",
         bucket_name=get_settings().minio_bucket,
         zip_object_key=build_export_object_key(event.id, export_id),
@@ -226,9 +236,54 @@ def create_and_generate_export(
     db.add(export_job)
     db.commit()
     db.refresh(export_job)
+    return export_job
 
+
+def mark_export_queued(db: Session, export_job: ExportJob) -> ExportJob:
+    export_job.status = "queued"
+    export_job.error_message = None
+    db.commit()
+    db.refresh(export_job)
+    return export_job
+
+
+def mark_export_exporting(db: Session, export_job: ExportJob) -> ExportJob:
+    export_job.status = "exporting"
+    export_job.error_message = None
+    db.commit()
+    db.refresh(export_job)
+    return export_job
+
+
+def mark_export_failed(
+    db: Session,
+    export_job: ExportJob,
+    error_message: str,
+) -> ExportJob:
+    export_job.status = "failed"
+    export_job.error_message = error_message
+    export_job.completed_at = datetime.now(UTC)
+    db.commit()
+    db.refresh(export_job)
+    return export_job
+
+
+def generate_export_archive(
+    db: Session,
+    export_job: ExportJob,
+    storage: StorageService,
+) -> ExportJob:
     try:
-        media_items = list_export_candidates(db, event.id, payload)
+        event = db.scalar(select(Event).where(Event.id == export_job.event_id))
+        if event is None:
+            raise ValueError("Export event not found.")
+
+        payload = ExportCreateRequest(
+            include_duplicates=export_job.include_duplicates,
+            include_blurry=export_job.include_blurry,
+            include_pending=export_job.include_pending,
+        )
+        media_items = list_export_candidates(db, export_job.event_id, payload)
         zip_bytes = build_export_zip_bytes(event, media_items, storage)
         storage.put_bytes(
             export_job.zip_object_key,
@@ -239,7 +294,7 @@ def create_and_generate_export(
         export_job.included_count = len(media_items)
         export_job.excluded_count = max(
             0,
-            count_event_media(db, event.id) - len(media_items),
+            count_event_media(db, export_job.event_id) - len(media_items),
         )
         export_job.completed_at = datetime.now(UTC)
         export_job.error_message = None
@@ -247,6 +302,9 @@ def create_and_generate_export(
         export_job.status = "failed"
         export_job.error_message = str(exc)
         export_job.completed_at = datetime.now(UTC)
+        db.commit()
+        db.refresh(export_job)
+        raise
 
     db.commit()
     db.refresh(export_job)

@@ -141,3 +141,25 @@ def test_enqueue_batch_resume_replaces_terminal_existing_job(monkeypatch) -> Non
     assert rq_job_id == f"resume:{job_id}:{thread_id}"
     assert terminal_job.deleted is True
     assert captured["queue"].job_id == f"resume:{job_id}:{thread_id}"
+
+
+def test_enqueue_export_sends_export_payload(monkeypatch) -> None:
+    captured = {}
+
+    def fake_queue(name: str, connection: object):
+        queue = FakeQueue(name, connection)
+        captured["queue"] = queue
+        return queue
+
+    export_id = uuid.uuid4()
+
+    monkeypatch.setattr(queue_service.redis, "from_url", lambda url: object())
+    monkeypatch.setattr(queue_service, "Queue", fake_queue)
+
+    rq_job_id = queue_service.enqueue_export(export_id)
+
+    assert rq_job_id == "generated-job-id"
+    assert captured["queue"].payload == {
+        "export_id": str(export_id),
+        "mode": "export",
+    }
