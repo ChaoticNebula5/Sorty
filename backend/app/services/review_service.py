@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from app.db.models import BatchJob, MediaAsset, ReviewDecision
 from app.schemas.review import ReviewDecisionUpdate
+from app.services import search_service
 
 
 def create_pending_review_decision(
@@ -102,6 +103,7 @@ def apply_review_decision(
             locked_decision.media.processing_error = None
         else:
             locked_decision.media.processing_status = "excluded"
+        search_service.upsert_media_embedding(db, locked_decision.media, commit=False)
 
     _mark_complete_review_batches(db, locked_batch_jobs)
 
@@ -199,6 +201,7 @@ def bulk_approve_pending_reviews(
         decision.reviewed_at = reviewed_at
         decision.media.processing_status = "processed"
         decision.media.processing_error = None
+        search_service.upsert_media_embedding(db, decision.media, commit=False)
 
     locked_batch_jobs = _lock_batch_jobs(db, list(touched_batch_job_ids))
     _mark_complete_review_batches(db, locked_batch_jobs)

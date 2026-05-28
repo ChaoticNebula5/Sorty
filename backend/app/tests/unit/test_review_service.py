@@ -41,8 +41,17 @@ def test_apply_review_decision_marks_approved_media_processed() -> None:
         include_in_export=None,
         reviewer_note="Good image.",
     )
+    indexed_media = []
 
-    result = review_service.apply_review_decision(db, decision, payload)
+    def fake_upsert_media_embedding(db, media, commit=True):
+        indexed_media.append(media)
+
+    original = review_service.search_service.upsert_media_embedding
+    review_service.search_service.upsert_media_embedding = fake_upsert_media_embedding
+    try:
+        result = review_service.apply_review_decision(db, decision, payload)
+    finally:
+        review_service.search_service.upsert_media_embedding = original
 
     assert result is decision
     assert decision.status == "approved"
@@ -51,6 +60,7 @@ def test_apply_review_decision_marks_approved_media_processed() -> None:
     assert decision.reviewed_at is not None
     assert media.processing_status == "processed"
     assert media.processing_error is None
+    assert indexed_media == [media]
     assert db.committed is True
     assert db.refreshed is True
 
@@ -69,8 +79,13 @@ def test_apply_review_decision_marks_rejected_media_excluded() -> None:
         reviewed_at=None,
     )
     payload = ReviewDecisionUpdate(status="rejected", include_in_export=False)
+    original = review_service.search_service.upsert_media_embedding
+    review_service.search_service.upsert_media_embedding = lambda *args, **kwargs: None
 
-    review_service.apply_review_decision(db, decision, payload)
+    try:
+        review_service.apply_review_decision(db, decision, payload)
+    finally:
+        review_service.search_service.upsert_media_embedding = original
 
     assert decision.status == "rejected"
     assert decision.include_in_export is False

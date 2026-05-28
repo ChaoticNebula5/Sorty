@@ -7,6 +7,7 @@ from app.api.routes_health import router as health_router
 from app.api.routes_jobs import router as jobs_router
 from app.api.routes_media import router as media_router
 from app.api.routes_review import router as review_router
+from app.api.routes_search import router as search_router
 from app.core.config import get_settings
 from app.core.errors import http_exception_handler, validation_exception_handler
 from app.core.logging import configure_logging
@@ -27,6 +28,7 @@ def create_app() -> FastAPI:
     app.include_router(jobs_router)
     app.include_router(media_router)
     app.include_router(review_router)
+    app.include_router(search_router)
 
     return app
 

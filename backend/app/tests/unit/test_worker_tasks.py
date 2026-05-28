@@ -112,6 +112,11 @@ def test_process_batch_job_marks_job_media_and_analysis_completed(
         lambda *args, **kwargs: calls.append("analysis_saved"),
     )
     monkeypatch.setattr(
+        tasks.search_service,
+        "upsert_media_embedding",
+        lambda db, media, commit=True: calls.append("embedding_saved"),
+    )
+    monkeypatch.setattr(
         tasks.media_service,
         "mark_media_processed",
         lambda db, media, commit=True: calls.append("single_media_processed"),
@@ -131,6 +136,7 @@ def test_process_batch_job_marks_job_media_and_analysis_completed(
         "job_processing",
         "single_media_processing",
         "analysis_saved",
+        "embedding_saved",
         "single_media_processed",
         "job_finished:1:0:0",
     ]
@@ -213,6 +219,7 @@ def test_process_batch_job_marks_partial_failed_for_single_media_failure(
     )
     monkeypatch.setattr(tasks.media_service, "mark_media_processing", lambda db, media: None)
     monkeypatch.setattr(tasks.analysis_service, "upsert_ai_analysis", lambda *args, **kwargs: None)
+    monkeypatch.setattr(tasks.search_service, "upsert_media_embedding", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         tasks.media_service,
         "mark_media_processed",
@@ -269,6 +276,7 @@ def test_process_batch_job_marks_media_needs_review(monkeypatch, tmp_path) -> No
     monkeypatch.setattr(tasks.media_service, "list_batch_media", lambda db, job_id, media_ids=None: [media])
     monkeypatch.setattr(tasks.media_service, "mark_media_processing", lambda db, media: None)
     monkeypatch.setattr(tasks.analysis_service, "upsert_ai_analysis", lambda *args, **kwargs: None)
+    monkeypatch.setattr(tasks.search_service, "upsert_media_embedding", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         tasks.review_service,
         "create_pending_review_decision",
@@ -334,6 +342,7 @@ def test_process_batch_job_ignores_payload_media_subset(monkeypatch, tmp_path) -
     monkeypatch.setattr(tasks.media_service, "list_batch_media", fake_list_batch_media)
     monkeypatch.setattr(tasks.media_service, "mark_media_processing", lambda db, media: None)
     monkeypatch.setattr(tasks.analysis_service, "upsert_ai_analysis", lambda *args, **kwargs: None)
+    monkeypatch.setattr(tasks.search_service, "upsert_media_embedding", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         tasks.media_service,
         "mark_media_processed",
