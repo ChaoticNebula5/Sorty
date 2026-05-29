@@ -85,13 +85,27 @@ def process_batch_job(payload: dict[str, Any]) -> str:
                         commit=False,
                     )
                     media.quality_signal = quality_signal
-                    search_service.upsert_media_embedding(db, media, commit=False)
                     review_reasons = list(result.review_reasons or [])
                     if (
                         quality_result.quality_label == "blurry"
                         and "low_quality_blur" not in review_reasons
                     ):
                         review_reasons.append("low_quality_blur")
+                    duplicate_result = quality_service.detect_duplicate_for_media(
+                        db,
+                        media_id=media.id,
+                        event_id=media.event_id,
+                        perceptual_hash=quality_result.perceptual_hash,
+                        batch_job_id=job.id,
+                        commit=False,
+                    )
+                    if (
+                        duplicate_result.is_duplicate
+                        and "possible_duplicate" not in review_reasons
+                    ):
+                        review_reasons.append("possible_duplicate")
+
+                    search_service.upsert_media_embedding(db, media, commit=False)
 
                     if result.needs_review or review_reasons:
                         review_service.create_pending_review_decision(
