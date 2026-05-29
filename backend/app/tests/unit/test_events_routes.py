@@ -213,8 +213,10 @@ def test_get_event_media_summary_returns_counts(monkeypatch) -> None:
         possible_duplicate_media=1,
         pending_review_decisions=2,
         approved_review_decisions=5,
+        edited_review_decisions=3,
         rejected_review_decisions=1,
         confirmed_duplicate_decisions=1,
+        export_ready_review_decisions=7,
     )
 
     monkeypatch.setattr(event_service, "get_event", lambda db, event_id: event)
@@ -240,6 +242,8 @@ def test_get_event_media_summary_returns_counts(monkeypatch) -> None:
     assert body["data"]["total_media"] == 10
     assert body["data"]["blurry_media"] == 2
     assert body["data"]["possible_duplicate_media"] == 1
+    assert body["data"]["edited_review_decisions"] == 3
+    assert body["data"]["export_ready_review_decisions"] == 7
 
 
 def test_get_event_media_summary_returns_404_for_missing_event(monkeypatch) -> None:

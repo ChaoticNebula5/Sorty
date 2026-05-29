@@ -30,8 +30,10 @@ class EventMediaSummaryData:
     possible_duplicate_media: int
     pending_review_decisions: int
     approved_review_decisions: int
+    edited_review_decisions: int
     rejected_review_decisions: int
     confirmed_duplicate_decisions: int
+    export_ready_review_decisions: int
 
 
 def build_original_object_key(
@@ -261,6 +263,11 @@ def get_event_media_summary(
             event_id,
             ReviewDecision.status == "approved",
         ),
+        edited_review_decisions=_count_review_decisions_where(
+            db,
+            event_id,
+            ReviewDecision.status == "edited",
+        ),
         rejected_review_decisions=_count_review_decisions_where(
             db,
             event_id,
@@ -270,6 +277,12 @@ def get_event_media_summary(
             db,
             event_id,
             ReviewDecision.status == "duplicate",
+        ),
+        export_ready_review_decisions=_count_review_decisions_where(
+            db,
+            event_id,
+            ReviewDecision.status.in_(("approved", "edited")),
+            ReviewDecision.include_in_export.is_(True),
         ),
     )
 

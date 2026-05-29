@@ -48,7 +48,8 @@ def test_get_event_media_summary_counts_media_quality_and_review_rows() -> None:
                 "create table review_decisions ("
                 "id char(32) primary key, "
                 "media_id char(32) not null, "
-                "status varchar(40) not null"
+                "status varchar(40) not null, "
+                "include_in_export boolean not null"
                 ")"
             )
         )
@@ -61,8 +62,9 @@ def test_get_event_media_summary_counts_media_quality_and_review_rows() -> None:
         blurry = _make_media(event.id, "blurry.jpg", "needs_review")
         duplicate = _make_media(event.id, "duplicate.jpg", "needs_review")
         failed = _make_media(event.id, "failed.jpg", "failed")
+        edited = _make_media(event.id, "edited.jpg", "processed")
         other = _make_media(other_event.id, "other.jpg", "needs_review")
-        db.add_all([processed, blurry, duplicate, failed, other])
+        db.add_all([processed, blurry, duplicate, failed, edited, other])
         db.flush()
         db.add_all(
             [
@@ -76,22 +78,25 @@ def test_get_event_media_summary_counts_media_quality_and_review_rows() -> None:
                 QualitySignal(media_id=other.id, quality_label="blurry", is_duplicate=True),
             ]
         )
-        for media, status in (
-            (processed, "approved"),
-            (blurry, "pending"),
-            (failed, "rejected"),
-            (duplicate, "duplicate"),
-            (other, "pending"),
+        for media, status, include_in_export in (
+            (processed, "approved", True),
+            (blurry, "pending", False),
+            (failed, "rejected", False),
+            (duplicate, "duplicate", False),
+            (edited, "edited", True),
+            (other, "pending", True),
         ):
             db.execute(
                 text(
-                    "insert into review_decisions (id, media_id, status) "
-                    "values (:id, :media_id, :status)"
+                    "insert into review_decisions "
+                    "(id, media_id, status, include_in_export) "
+                    "values (:id, :media_id, :status, :include_in_export)"
                 ),
                 {
                     "id": uuid.uuid4().hex,
                     "media_id": media.id.hex,
                     "status": status,
+                    "include_in_export": include_in_export,
                 },
             )
         db.commit()
@@ -99,16 +104,18 @@ def test_get_event_media_summary_counts_media_quality_and_review_rows() -> None:
         summary = media_service.get_event_media_summary(db, event.id)
 
     assert summary.event_id == event.id
-    assert summary.total_media == 4
-    assert summary.processed_media == 1
+    assert summary.total_media == 5
+    assert summary.processed_media == 2
     assert summary.needs_review_media == 2
     assert summary.failed_media == 1
     assert summary.blurry_media == 1
     assert summary.possible_duplicate_media == 1
     assert summary.pending_review_decisions == 1
     assert summary.approved_review_decisions == 1
+    assert summary.edited_review_decisions == 1
     assert summary.rejected_review_decisions == 1
     assert summary.confirmed_duplicate_decisions == 1
+    assert summary.export_ready_review_decisions == 2
 
 
 def _make_media(

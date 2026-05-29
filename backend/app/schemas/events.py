@@ -37,5 +37,7 @@ class EventMediaSummary(BaseModel):
     possible_duplicate_media: int
     pending_review_decisions: int
     approved_review_decisions: int
+    edited_review_decisions: int
     rejected_review_decisions: int
     confirmed_duplicate_decisions: int
+    export_ready_review_decisions: int
