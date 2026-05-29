@@ -86,6 +86,17 @@ def test_mediaops_graph_interrupts_and_resumes_review_checkpoint() -> None:
 
     assert resumed["phase"] == "finalized"
     assert resumed["reviewed"] is True
+    resumed_result = mediaops_graph.graph_result_from_invoke(
+        thread_id=thread_id,
+        result=resumed,
+    )
+    assert resumed_result == mediaops_graph.MediaOpsGraphResult(
+        status="finalized",
+        thread_id=thread_id,
+        job_id=job_id,
+        event_id=event_id,
+        pending_review_count=2,
+    )
 
 
 def test_resume_reviewed_batch_validates_required_values() -> None:

@@ -21,6 +21,10 @@ class WorkflowCheckpointError(RuntimeError):
     pass
 
 
+class WorkflowResumeError(RuntimeError):
+    pass
+
+
 def health_check_task() -> str:
     return "ok"
 
@@ -159,7 +163,17 @@ def resume_batch_job(payload: dict[str, Any]) -> str:
                 raise ValueError(f"Cannot resume job with status: {job.status}")
 
             job_service.mark_job_processing(db, job)
-            resume_reviewed_batch(thread_id=thread_id, job_id=str(job_id))
+            graph_result = resume_reviewed_batch(thread_id=thread_id, job_id=str(job_id))
+            if graph_result.status != "finalized":
+                raise WorkflowResumeError(
+                    f"Expected finalized graph after review resume, got {graph_result.status}."
+                )
+            if (
+                graph_result.thread_id != thread_id
+                or graph_result.job_id != str(job_id)
+                or graph_result.event_id != str(job.event_id)
+            ):
+                raise WorkflowResumeError("Resumed graph result does not match batch job.")
             job_service.mark_job_resume_placeholder_done(db, job)
         except Exception as exc:
             db.rollback()

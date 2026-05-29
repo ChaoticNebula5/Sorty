@@ -121,17 +121,18 @@ def run_mediaops_batch(
     return graph_result_from_invoke(thread_id=thread_id, result=result)
 
 
-def resume_reviewed_batch(thread_id: str, job_id: str) -> None:
+def resume_reviewed_batch(thread_id: str, job_id: str) -> MediaOpsGraphResult:
     if not thread_id:
         raise ValueError("LangGraph thread id is required.")
     if not job_id:
         raise ValueError("Batch job id is required.")
 
     graph = get_mediaops_graph()
-    graph.invoke(
+    result = graph.invoke(
         Command(resume={"reviewed": True, "job_id": job_id}),
         config={"configurable": {"thread_id": thread_id}},
     )
+    return graph_result_from_invoke(thread_id=thread_id, result=result)
 
 
 def graph_result_from_invoke(

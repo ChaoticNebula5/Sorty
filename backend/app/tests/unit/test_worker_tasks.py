@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.schemas.ai import FolderSuggestion, ImageAnalysisResult
+from app.agents.mediaops_graph import MediaOpsGraphResult
 from worker import tasks
 
 
@@ -495,7 +496,16 @@ def test_resume_batch_job_marks_placeholder_done(monkeypatch) -> None:
     monkeypatch.setattr(
         tasks,
         "resume_reviewed_batch",
-        lambda thread_id, job_id: calls.append(f"graph:{thread_id}:{job_id}"),
+        lambda thread_id, job_id: (
+            calls.append(f"graph:{thread_id}:{job_id}")
+            or MediaOpsGraphResult(
+                status="finalized",
+                thread_id=thread_id,
+                job_id=job_id,
+                event_id=str(job.event_id),
+                pending_review_count=0,
+            )
+        ),
     )
     monkeypatch.setattr(
         tasks.job_service,
@@ -514,6 +524,92 @@ def test_resume_batch_job_marks_placeholder_done(monkeypatch) -> None:
 
     assert result == str(job.id)
     assert calls == ["processing", f"graph:thread-1:{job.id}", "placeholder_done"]
+
+
+def test_resume_batch_job_rejects_unfinalized_graph_result(monkeypatch) -> None:
+    fake_db = FakeSession()
+    job = SimpleNamespace(
+        id=uuid.uuid4(),
+        event_id=uuid.uuid4(),
+        langgraph_thread_id="thread-1",
+        status="queued",
+    )
+    calls: list[str] = []
+
+    monkeypatch.setattr(tasks, "SessionLocal", lambda: fake_db)
+    monkeypatch.setattr(tasks.job_service, "get_batch_job", lambda db, job_id: job)
+    monkeypatch.setattr(tasks.job_service, "mark_job_processing", lambda db, job: None)
+    monkeypatch.setattr(
+        tasks,
+        "resume_reviewed_batch",
+        lambda thread_id, job_id: MediaOpsGraphResult(
+            status="interrupted_for_review",
+            thread_id=thread_id,
+            job_id=job_id,
+            event_id=str(job.event_id),
+            pending_review_count=1,
+        ),
+    )
+    monkeypatch.setattr(
+        tasks.job_service,
+        "mark_job_resume_enqueue_failed",
+        lambda db, job: calls.append("retryable"),
+    )
+
+    with pytest.raises(tasks.WorkflowResumeError):
+        tasks.resume_batch_job(
+            {
+                "job_id": str(job.id),
+                "event_id": str(job.event_id),
+                "thread_id": job.langgraph_thread_id,
+                "mode": "resume",
+            }
+        )
+
+    assert calls == ["retryable"]
+
+
+def test_resume_batch_job_rejects_mismatched_graph_result(monkeypatch) -> None:
+    fake_db = FakeSession()
+    job = SimpleNamespace(
+        id=uuid.uuid4(),
+        event_id=uuid.uuid4(),
+        langgraph_thread_id="thread-1",
+        status="queued",
+    )
+    calls: list[str] = []
+
+    monkeypatch.setattr(tasks, "SessionLocal", lambda: fake_db)
+    monkeypatch.setattr(tasks.job_service, "get_batch_job", lambda db, job_id: job)
+    monkeypatch.setattr(tasks.job_service, "mark_job_processing", lambda db, job: None)
+    monkeypatch.setattr(
+        tasks,
+        "resume_reviewed_batch",
+        lambda thread_id, job_id: MediaOpsGraphResult(
+            status="finalized",
+            thread_id=thread_id,
+            job_id=str(uuid.uuid4()),
+            event_id=str(job.event_id),
+            pending_review_count=0,
+        ),
+    )
+    monkeypatch.setattr(
+        tasks.job_service,
+        "mark_job_resume_enqueue_failed",
+        lambda db, job: calls.append("retryable"),
+    )
+
+    with pytest.raises(tasks.WorkflowResumeError):
+        tasks.resume_batch_job(
+            {
+                "job_id": str(job.id),
+                "event_id": str(job.event_id),
+                "thread_id": job.langgraph_thread_id,
+                "mode": "resume",
+            }
+        )
+
+    assert calls == ["retryable"]
 
 
 def test_resume_batch_job_marks_failed_on_error(monkeypatch) -> None:
