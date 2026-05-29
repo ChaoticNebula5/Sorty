@@ -169,6 +169,19 @@ def mark_job_failed(db: Session, job: BatchJob, error_message: str) -> BatchJob:
     return job
 
 
+def mark_job_workflow_failed(
+    db: Session,
+    job: BatchJob,
+    error_message: str,
+) -> BatchJob:
+    job.status = "failed"
+    job.error_message = error_message
+    job.completed_at = datetime.now(UTC)
+    db.commit()
+    db.refresh(job)
+    return job
+
+
 def mark_job_reviewed_if_complete(db: Session, job: BatchJob) -> BatchJob:
     job.status = "reviewed"
     job.needs_review_count = 0

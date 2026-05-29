@@ -64,7 +64,11 @@ def test_process_batch_job_marks_job_media_and_analysis_completed(
     tmp_path,
 ) -> None:
     fake_db = FakeSession()
-    job = SimpleNamespace(id=uuid.uuid4(), event_id=uuid.uuid4())
+    job = SimpleNamespace(
+        id=uuid.uuid4(),
+        event_id=uuid.uuid4(),
+        langgraph_thread_id="thread-1",
+    )
     media = SimpleNamespace(
         id=uuid.uuid4(),
         event_id=uuid.uuid4(),
@@ -128,6 +132,11 @@ def test_process_batch_job_marks_job_media_and_analysis_completed(
             f"job_finished:{processed_files}:{failed_files}:{needs_review_count}"
         ),
     )
+    monkeypatch.setattr(
+        tasks,
+        "run_mediaops_batch",
+        lambda **kwargs: calls.append(f"graph:{kwargs['needs_review_count']}"),
+    )
 
     result = tasks.process_batch_job({"job_id": str(job.id)})
 
@@ -139,6 +148,7 @@ def test_process_batch_job_marks_job_media_and_analysis_completed(
         "embedding_saved",
         "single_media_processed",
         "job_finished:1:0:0",
+        "graph:0",
     ]
     assert provider.event_context == {
         "event_id": str(job.event_id),
@@ -149,7 +159,11 @@ def test_process_batch_job_marks_job_media_and_analysis_completed(
 
 def test_process_batch_job_marks_job_and_media_failed(monkeypatch) -> None:
     fake_db = FakeSession()
-    job = SimpleNamespace(id=uuid.uuid4(), event_id=uuid.uuid4())
+    job = SimpleNamespace(
+        id=uuid.uuid4(),
+        event_id=uuid.uuid4(),
+        langgraph_thread_id="thread-1",
+    )
     calls: list[str] = []
 
     def fail_storage():
@@ -182,7 +196,11 @@ def test_process_batch_job_marks_partial_failed_for_single_media_failure(
     tmp_path,
 ) -> None:
     fake_db = FakeSession()
-    job = SimpleNamespace(id=uuid.uuid4(), event_id=uuid.uuid4())
+    job = SimpleNamespace(
+        id=uuid.uuid4(),
+        event_id=uuid.uuid4(),
+        langgraph_thread_id="thread-1",
+    )
     first_media = SimpleNamespace(
         id=uuid.uuid4(),
         event_id=uuid.uuid4(),
@@ -237,6 +255,7 @@ def test_process_batch_job_marks_partial_failed_for_single_media_failure(
             f"finished:{processed_files}:{failed_files}:{needs_review_count}"
         ),
     )
+    monkeypatch.setattr(tasks, "run_mediaops_batch", lambda **kwargs: calls.append("graph"))
 
     result = tasks.process_batch_job({"job_id": str(job.id)})
 
@@ -244,11 +263,16 @@ def test_process_batch_job_marks_partial_failed_for_single_media_failure(
     assert f"processed:{first_media.id}" in calls
     assert f"failed:{second_media.id}" in calls
     assert "finished:1:1:0" in calls
+    assert "graph" in calls
 
 
 def test_process_batch_job_marks_media_needs_review(monkeypatch, tmp_path) -> None:
     fake_db = FakeSession()
-    job = SimpleNamespace(id=uuid.uuid4(), event_id=uuid.uuid4())
+    job = SimpleNamespace(
+        id=uuid.uuid4(),
+        event_id=uuid.uuid4(),
+        langgraph_thread_id="thread-1",
+    )
     media = SimpleNamespace(
         id=uuid.uuid4(),
         event_id=job.event_id,
@@ -298,6 +322,7 @@ def test_process_batch_job_marks_media_needs_review(monkeypatch, tmp_path) -> No
             f"finished:{processed_files}:{failed_files}:{needs_review_count}"
         ),
     )
+    monkeypatch.setattr(tasks, "run_mediaops_batch", lambda **kwargs: calls.append("graph"))
 
     result = tasks.process_batch_job({"job_id": str(job.id), "media_ids": [str(media.id)]})
 
@@ -306,12 +331,17 @@ def test_process_batch_job_marks_media_needs_review(monkeypatch, tmp_path) -> No
         "review:low_confidence",
         "needs_review:low_confidence",
         "finished:0:0:1",
+        "graph",
     ]
 
 
 def test_process_batch_job_ignores_payload_media_subset(monkeypatch, tmp_path) -> None:
     fake_db = FakeSession()
-    job = SimpleNamespace(id=uuid.uuid4(), event_id=uuid.uuid4())
+    job = SimpleNamespace(
+        id=uuid.uuid4(),
+        event_id=uuid.uuid4(),
+        langgraph_thread_id="thread-1",
+    )
     first_media = SimpleNamespace(
         id=uuid.uuid4(),
         event_id=job.event_id,
@@ -353,6 +383,7 @@ def test_process_batch_job_ignores_payload_media_subset(monkeypatch, tmp_path) -
         "mark_job_finished",
         lambda db, job, processed_files, failed_files, needs_review_count: None,
     )
+    monkeypatch.setattr(tasks, "run_mediaops_batch", lambda **kwargs: None)
 
     tasks.process_batch_job(
         {
@@ -363,6 +394,74 @@ def test_process_batch_job_ignores_payload_media_subset(monkeypatch, tmp_path) -
 
     assert captured_filters == [None]
     assert processed_media_ids == [first_media.id, second_media.id]
+
+
+def test_process_batch_job_graph_failure_does_not_mark_media_failed(monkeypatch, tmp_path) -> None:
+    fake_db = FakeSession()
+    job = SimpleNamespace(
+        id=uuid.uuid4(),
+        event_id=uuid.uuid4(),
+        langgraph_thread_id="thread-1",
+    )
+    media = SimpleNamespace(
+        id=uuid.uuid4(),
+        event_id=job.event_id,
+        original_object_key="events/event-id/originals/first.jpg",
+    )
+    calls: list[str] = []
+
+    monkeypatch.setattr(tasks, "SessionLocal", lambda: fake_db)
+    monkeypatch.setattr(tasks.job_service, "get_batch_job", lambda db, job_id: job)
+    monkeypatch.setattr(tasks.event_service, "get_event", lambda db, event_id: None)
+    monkeypatch.setattr(tasks.job_service, "mark_job_processing", lambda db, job: None)
+    monkeypatch.setattr(
+        tasks.storage_factory,
+        "get_storage_service",
+        lambda: FakeStorage(tmp_path / "graph.jpg"),
+    )
+    monkeypatch.setattr(tasks.vision_service, "get_vision_provider", lambda: FakeVisionProvider())
+    monkeypatch.setattr(tasks.media_service, "list_batch_media", lambda db, job_id, media_ids=None: [media])
+    monkeypatch.setattr(tasks.media_service, "mark_media_processing", lambda db, media: None)
+    monkeypatch.setattr(tasks.analysis_service, "upsert_ai_analysis", lambda *args, **kwargs: None)
+    monkeypatch.setattr(tasks.search_service, "upsert_media_embedding", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        tasks.media_service,
+        "mark_media_processed",
+        lambda db, media, commit=True: calls.append("media_processed"),
+    )
+    monkeypatch.setattr(
+        tasks.job_service,
+        "mark_job_finished",
+        lambda db, job, processed_files, failed_files, needs_review_count: job,
+    )
+    monkeypatch.setattr(
+        tasks,
+        "run_mediaops_batch",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("checkpoint down")),
+    )
+    monkeypatch.setattr(
+        tasks.job_service,
+        "mark_job_workflow_failed",
+        lambda db, job, error_message: calls.append(error_message),
+    )
+    monkeypatch.setattr(
+        tasks.media_service,
+        "mark_batch_media_failed",
+        lambda db, job_id, error_message: calls.append("batch_media_failed"),
+    )
+    monkeypatch.setattr(
+        tasks.job_service,
+        "mark_job_failed",
+        lambda db, job, error_message: calls.append("job_failed"),
+    )
+
+    with pytest.raises(tasks.WorkflowCheckpointError):
+        tasks.process_batch_job({"job_id": str(job.id)})
+
+    assert "media_processed" in calls
+    assert "Could not create LangGraph checkpoint: checkpoint down" in calls
+    assert "batch_media_failed" not in calls
+    assert "job_failed" not in calls
 
 
 def test_process_batch_job_raises_for_missing_job(monkeypatch) -> None:

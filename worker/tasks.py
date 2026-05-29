@@ -2,7 +2,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
-from app.agents.mediaops_graph import resume_reviewed_batch
+from app.agents.mediaops_graph import resume_reviewed_batch, run_mediaops_batch
 from app.db.session import SessionLocal
 from app.services import (
     analysis_service,
@@ -15,6 +15,10 @@ from app.services import (
     storage_factory,
     vision_service,
 )
+
+
+class WorkflowCheckpointError(RuntimeError):
+    pass
 
 
 def health_check_task() -> str:
@@ -99,13 +103,29 @@ def process_batch_job(payload: dict[str, Any]) -> str:
                         except OSError:
                             pass
 
-            job_service.mark_job_finished(
+            finished_job = job_service.mark_job_finished(
                 db,
                 job,
                 processed_files=processed_files,
                 failed_files=failed_files,
                 needs_review_count=needs_review_count,
-            )
+            ) or job
+            try:
+                run_mediaops_batch(
+                    thread_id=finished_job.langgraph_thread_id,
+                    job_id=str(finished_job.id),
+                    event_id=str(finished_job.event_id),
+                    needs_review_count=needs_review_count,
+                )
+            except Exception as graph_exc:
+                job_service.mark_job_workflow_failed(
+                    db,
+                    finished_job,
+                    f"Could not create LangGraph checkpoint: {graph_exc}",
+                )
+                raise WorkflowCheckpointError(str(graph_exc)) from graph_exc
+        except WorkflowCheckpointError:
+            raise
         except Exception as exc:
             db.rollback()
             media_service.mark_batch_media_failed(db, job.id, str(exc))

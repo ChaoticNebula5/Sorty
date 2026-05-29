@@ -11,6 +11,8 @@ pgvector==0.3.6
 
 redis==5.2.1
 rq==2.1.0
+langgraph>=0.2.60
+langgraph-checkpoint-postgres>=2.0.0
 
 minio==7.2.13
 
