@@ -178,7 +178,7 @@ def test_resume_job_blocks_invalid_resolved_reviews(monkeypatch) -> None:
     finally:
         app.dependency_overrides.clear()
 
-    assert response.status_code == 409
+        assert response.status_code == 409
     assert response.json()["error"]["code"] == "invalid_review_decisions"
 
 
@@ -296,6 +296,7 @@ def test_resume_job_rejects_duplicate_queued_resume(monkeypatch) -> None:
 
 def test_resume_job_marks_failed_when_queue_unavailable(monkeypatch) -> None:
     job = make_job(status="reviewed")
+    calls: list[str] = []
 
     def fake_enqueue_batch_resume(job_id, event_id, thread_id):
         raise RuntimeError("redis down")
@@ -313,6 +314,11 @@ def test_resume_job_marks_failed_when_queue_unavailable(monkeypatch) -> None:
     )
     monkeypatch.setattr(queue_service, "enqueue_batch_resume", fake_enqueue_batch_resume)
     monkeypatch.setattr(job_service, "claim_job_for_resume", lambda db, job_id, rq_job_id: job)
+    monkeypatch.setattr(
+        job_service,
+        "mark_job_resume_enqueue_failed",
+        lambda db, failed_job: calls.append(str(failed_job.id)),
+    )
     app.dependency_overrides[get_db] = override_db
 
     try:
@@ -328,13 +334,14 @@ def test_resume_job_marks_failed_when_queue_unavailable(monkeypatch) -> None:
     assert body["error"]["code"] == "queue_unavailable"
     assert body["error"]["details"]["retryable"] is True
     assert body["error"]["details"]["rq_job_id"] == (
-        f"resume:{job.id}:{job.langgraph_thread_id}"
+        f"resume-{job.id}-{job.langgraph_thread_id}"
     )
+    assert calls == [str(job.id)]
 
 
 def test_resume_job_retries_already_claimed_resume(monkeypatch) -> None:
     job = make_job(status="queued")
-    job.current_rq_job_id = f"resume:{job.id}:{job.langgraph_thread_id}"
+    job.current_rq_job_id = f"resume-{job.id}-{job.langgraph_thread_id}"
     enqueued = []
 
     monkeypatch.setattr(job_service, "get_batch_job", lambda db, job_id: job)

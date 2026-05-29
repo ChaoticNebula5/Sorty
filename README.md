@@ -18,9 +18,9 @@ No JWT/OAuth is used. No ChromaDB, Pinecone, or Weaviate is used.
 
 ## Current Status
 
-Backend MVP is mostly complete. The remaining work before a basic UI is:
+Backend MVP is smoke-verified via the Docker-backed manual smoke test.
+The next work before a basic UI is:
 
-- run a Docker-backed manual smoke test
 - add a few integration tests around Postgres, MinIO, Redis/RQ, and export
 - optionally add Gemini behind the existing `VisionProvider`
 - build a minimal UI after backend flow is proven
@@ -75,7 +75,7 @@ Use the project virtual environment:
 .\.venv\Scripts\python.exe -m pytest backend/app/tests/unit
 ```
 
-At the time of writing, the unit suite has 187 passing tests.
+At the time of writing, the unit suite has 191 passing tests.
 
 ## Main Backend Flow
 

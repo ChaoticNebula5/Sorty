@@ -215,7 +215,7 @@ def resume_batch_job(payload: dict[str, Any]) -> str:
                 or graph_result.event_id != str(job.event_id)
             ):
                 raise WorkflowResumeError("Resumed graph result does not match batch job.")
-            job_service.mark_job_resume_placeholder_done(db, job)
+            job_service.mark_job_resume_completed(db, job)
         except Exception as exc:
             db.rollback()
             if job is not None and job.status in {"queued", "processing"}:

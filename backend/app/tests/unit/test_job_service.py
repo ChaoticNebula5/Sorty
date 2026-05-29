@@ -68,6 +68,32 @@ def test_mark_job_partial_failed_updates_progress_counts() -> None:
     assert db.refreshed is True
 
 
+def test_mark_job_resume_completed_updates_completion_fields() -> None:
+    db = FakeDb()
+    job = SimpleNamespace(
+        status="processing",
+        total_files=5,
+        processed_files=2,
+        failed_files=1,
+        needs_review_count=2,
+        current_rq_job_id="resume-job",
+        error_message="placeholder",
+        completed_at=None,
+    )
+
+    result = job_service.mark_job_resume_completed(db, job)
+
+    assert result is job
+    assert job.status == "completed"
+    assert job.current_rq_job_id is None
+    assert job.error_message is None
+    assert job.needs_review_count == 0
+    assert job.processed_files == 4
+    assert job.completed_at is not None
+    assert db.committed is True
+    assert db.refreshed is True
+
+
 def test_list_event_jobs_uses_deterministic_ordering() -> None:
     captured = {}
 

@@ -68,10 +68,13 @@ def claim_job_for_resume(
     return job
 
 
-def mark_job_resume_placeholder_done(db: Session, job: BatchJob) -> BatchJob:
-    job.status = "reviewed"
+def mark_job_resume_completed(db: Session, job: BatchJob) -> BatchJob:
+    job.status = "completed"
     job.current_rq_job_id = None
-    job.error_message = "Resume graph placeholder completed; finalization not implemented."
+    job.error_message = None
+    job.needs_review_count = 0
+    job.processed_files = max(0, job.total_files - job.failed_files)
+    job.completed_at = datetime.now(UTC)
     db.commit()
     db.refresh(job)
     return job

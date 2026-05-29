@@ -115,6 +115,7 @@ def resume_job(
             thread_id=claimed_job.langgraph_thread_id,
         )
     except Exception as exc:
+        job_service.mark_job_resume_enqueue_failed(db, claimed_job)
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={

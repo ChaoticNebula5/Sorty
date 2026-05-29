@@ -2,6 +2,13 @@
 
 This walkthrough proves the backend flow before building a UI.
 
+## Status
+
+- Last verified: 2026-05-29 (Docker compose local run)
+- Result: job completed with 2 processed files and 0 failed
+- Export: completed with 2 included files
+- ZIP contents: uploaded images, metadata.csv, summary.md
+
 ## 1. Start Services
 
 ```powershell

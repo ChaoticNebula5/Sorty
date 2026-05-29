@@ -9,7 +9,7 @@ from worker.tasks import generate_export_job, process_batch_job, resume_batch_jo
 
 
 def build_resume_rq_job_id(job_id: uuid.UUID, thread_id: str) -> str:
-    return f"resume:{job_id}:{thread_id}"
+    return f"resume-{job_id}-{thread_id}"
 
 
 def _get_rq_job_status(job: object) -> str | None:

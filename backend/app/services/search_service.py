@@ -2,6 +2,7 @@ import hashlib
 import math
 import uuid
 from dataclasses import dataclass
+from typing import Protocol
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -10,6 +11,14 @@ from app.core.config import get_settings
 from app.db.models import MediaAsset, MediaEmbedding, QualitySignal, ReviewDecision
 
 MEDIA_EMBEDDING_DIMENSION = 384
+
+
+class EmbeddingProvider(Protocol):
+    provider_name: str
+    model_name: str
+
+    def embed_text(self, text: str) -> list[float]:
+        ...
 
 
 @dataclass(frozen=True)
@@ -32,7 +41,7 @@ class MockEmbeddingProvider:
     def __init__(self, dimension: int | None = None) -> None:
         settings = get_settings()
         self.model_name = settings.embedding_model
-        self.dimension = dimension or MEDIA_EMBEDDING_DIMENSION
+        self.dimension = dimension or settings.embedding_dimension or MEDIA_EMBEDDING_DIMENSION
 
     def embed_text(self, text: str) -> list[float]:
         normalized_text = " ".join(text.lower().split())
@@ -53,8 +62,45 @@ class MockEmbeddingProvider:
         return [value / magnitude for value in values]
 
 
-def get_embedding_provider() -> MockEmbeddingProvider:
-    return MockEmbeddingProvider()
+class SentenceTransformersEmbeddingProvider:
+    provider_name = "sentence-transformers"
+
+    def __init__(self, model_name: str | None = None, dimension: int | None = None) -> None:
+        settings = get_settings()
+        self.model_name = model_name or settings.embedding_model
+        self.dimension = dimension or settings.embedding_dimension or MEDIA_EMBEDDING_DIMENSION
+        self._model = _load_sentence_transformers_model(self.model_name)
+
+    def embed_text(self, text: str) -> list[float]:
+        vector = self._model.encode([text], normalize_embeddings=True)[0]
+        values = vector.tolist() if hasattr(vector, "tolist") else list(vector)
+        if len(values) != self.dimension:
+            raise ValueError(
+                "Embedding dimension mismatch: "
+                f"expected {self.dimension}, got {len(values)} for {self.model_name}."
+            )
+        return values
+
+
+def _load_sentence_transformers_model(model_name: str):
+    try:
+        from sentence_transformers import SentenceTransformer
+    except ImportError as exc:
+        raise ValueError(
+            "SentenceTransformers provider requires sentence-transformers. "
+            "Install with `pip install sentence-transformers`."
+        ) from exc
+    return SentenceTransformer(model_name)
+
+
+def get_embedding_provider() -> EmbeddingProvider:
+    settings = get_settings()
+    if settings.embedding_provider == "mock":
+        return MockEmbeddingProvider()
+    if settings.embedding_provider == "sentence-transformers":
+        return SentenceTransformersEmbeddingProvider()
+
+    raise ValueError(f"Unsupported embedding provider: {settings.embedding_provider}")
 
 
 def build_indexed_text(media: MediaAsset) -> str:
@@ -90,7 +136,7 @@ def build_indexed_text(media: MediaAsset) -> str:
 def upsert_media_embedding(
     db: Session,
     media: MediaAsset,
-    provider: MockEmbeddingProvider | None = None,
+    provider: EmbeddingProvider | None = None,
     commit: bool = True,
 ) -> MediaEmbedding:
     provider = provider or get_embedding_provider()
@@ -122,7 +168,7 @@ def search_event_media(
     limit: int = 20,
     offset: int = 0,
     filters: SearchFilters | None = None,
-    provider: MockEmbeddingProvider | None = None,
+    provider: EmbeddingProvider | None = None,
 ) -> list[SearchResult]:
     provider = provider or get_embedding_provider()
     filters = filters or SearchFilters()

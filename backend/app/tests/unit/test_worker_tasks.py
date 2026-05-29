@@ -796,7 +796,7 @@ def test_process_batch_job_raises_for_missing_job(monkeypatch) -> None:
         tasks.process_batch_job({"job_id": str(job_id)})
 
 
-def test_resume_batch_job_marks_placeholder_done(monkeypatch) -> None:
+def test_resume_batch_job_marks_completed(monkeypatch) -> None:
     fake_db = FakeSession()
     job = SimpleNamespace(
         id=uuid.uuid4(),
@@ -829,8 +829,8 @@ def test_resume_batch_job_marks_placeholder_done(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         tasks.job_service,
-        "mark_job_resume_placeholder_done",
-        lambda db, job: calls.append("placeholder_done"),
+        "mark_job_resume_completed",
+        lambda db, job: calls.append("completed"),
     )
 
     result = tasks.resume_batch_job(
@@ -843,7 +843,7 @@ def test_resume_batch_job_marks_placeholder_done(monkeypatch) -> None:
     )
 
     assert result == str(job.id)
-    assert calls == ["processing", f"graph:thread-1:{job.id}", "placeholder_done"]
+    assert calls == ["processing", f"graph:thread-1:{job.id}", "completed"]
 
 
 def test_resume_batch_job_rejects_unfinalized_graph_result(monkeypatch) -> None:

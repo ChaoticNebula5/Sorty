@@ -55,8 +55,8 @@ def test_enqueue_batch_resume_uses_deterministic_job_id(monkeypatch) -> None:
         thread_id=thread_id,
     )
 
-    assert rq_job_id == f"resume:{job_id}:{thread_id}"
-    assert captured["queue"].job_id == f"resume:{job_id}:{thread_id}"
+    assert rq_job_id == f"resume-{job_id}-{thread_id}"
+    assert captured["queue"].job_id == f"resume-{job_id}-{thread_id}"
     assert captured["queue"].payload == {
         "job_id": str(job_id),
         "event_id": str(event_id),
@@ -86,7 +86,7 @@ def test_enqueue_batch_resume_returns_existing_deterministic_job(monkeypatch) ->
         thread_id=thread_id,
     )
 
-    assert rq_job_id == f"resume:{job_id}:{thread_id}"
+    assert rq_job_id == f"resume-{job_id}-{thread_id}"
     assert not hasattr(captured["queue"], "payload")
 
 
@@ -111,7 +111,7 @@ def test_enqueue_batch_resume_treats_rq_status_enum_as_reusable(monkeypatch) -> 
         thread_id=thread_id,
     )
 
-    assert rq_job_id == f"resume:{job_id}:{thread_id}"
+    assert rq_job_id == f"resume-{job_id}-{thread_id}"
     assert not hasattr(captured["queue"], "payload")
 
 
@@ -138,9 +138,9 @@ def test_enqueue_batch_resume_replaces_terminal_existing_job(monkeypatch) -> Non
         thread_id=thread_id,
     )
 
-    assert rq_job_id == f"resume:{job_id}:{thread_id}"
+    assert rq_job_id == f"resume-{job_id}-{thread_id}"
     assert terminal_job.deleted is True
-    assert captured["queue"].job_id == f"resume:{job_id}:{thread_id}"
+    assert captured["queue"].job_id == f"resume-{job_id}-{thread_id}"
 
 
 def test_enqueue_export_sends_export_payload(monkeypatch) -> None:

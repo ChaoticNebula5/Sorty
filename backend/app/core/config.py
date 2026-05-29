@@ -43,6 +43,7 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://ollama:11434"
     ollama_vision_model: str = "llava"
 
+    embedding_provider: Literal["mock", "sentence-transformers"] = "mock"
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_dimension: int = 384
 
