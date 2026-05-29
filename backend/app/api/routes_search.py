@@ -46,6 +46,10 @@ def search_event_media(
     q: str = Query(min_length=2, max_length=200),
     limit: int = Query(default=20, ge=1, le=50),
     offset: int = Query(default=0, ge=0),
+    include_duplicates: bool = Query(default=False),
+    include_blurry: bool = Query(default=True),
+    include_pending: bool = Query(default=False),
+    export_ready_only: bool = Query(default=True),
     db: Session = Depends(get_db),
 ) -> APIListResponse:
     event = event_service.get_event(db, event_id)
@@ -59,14 +63,21 @@ def search_event_media(
             },
         )
 
+    filters = search_service.SearchFilters(
+        include_duplicates=include_duplicates,
+        include_blurry=include_blurry,
+        include_pending=include_pending,
+        export_ready_only=export_ready_only,
+    )
     results = search_service.search_event_media(
         db,
         event_id=event_id,
         query=q,
         limit=limit,
         offset=offset,
+        filters=filters,
     )
-    total = search_service.count_searchable_event_media(db, event_id)
+    total = search_service.count_searchable_event_media(db, event_id, filters=filters)
 
     return APIListResponse(
         data=[search_result_to_read(result) for result in results],

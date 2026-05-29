@@ -32,6 +32,39 @@ def create_pending_review_decision(
     return decision
 
 
+def create_auto_approved_review_decision(
+    db: Session,
+    media: MediaAsset,
+    commit: bool = True,
+) -> ReviewDecision:
+    decision = db.scalar(
+        select(ReviewDecision).where(ReviewDecision.media_id == media.id)
+    )
+    if decision is None:
+        decision = ReviewDecision(media_id=media.id)
+        db.add(decision)
+
+    analysis = getattr(media, "ai_analysis", None)
+    decision.status = "approved"
+    decision.final_primary_folder = getattr(
+        analysis,
+        "suggested_primary_folder",
+        None,
+    )
+    decision.final_sub_folder = getattr(analysis, "suggested_sub_folder", None)
+    decision.final_tags = list(getattr(analysis, "tags", []) or [])
+    decision.include_in_export = True
+    decision.review_reasons = []
+    decision.reviewer_note = None
+    decision.reviewed_at = datetime.now(UTC)
+
+    if commit:
+        db.commit()
+        db.refresh(decision)
+
+    return decision
+
+
 def list_event_review_queue(
     db: Session,
     event_id: uuid.UUID,

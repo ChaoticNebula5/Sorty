@@ -12,12 +12,50 @@ class FakeDb:
     def __init__(self) -> None:
         self.committed = False
         self.refreshed = False
+        self.added = None
+        self.scalar_result = None
+
+    def scalar(self, statement):
+        return self.scalar_result
+
+    def add(self, item: object) -> None:
+        self.added = item
 
     def commit(self) -> None:
         self.committed = True
 
     def refresh(self, item: object) -> None:
         self.refreshed = True
+
+
+def test_create_auto_approved_review_decision_uses_analysis_metadata() -> None:
+    db = FakeDb()
+    media_id = uuid.uuid4()
+    media = SimpleNamespace(
+        id=media_id,
+        ai_analysis=SimpleNamespace(
+            suggested_primary_folder="Highlights",
+            suggested_sub_folder="Stage",
+            tags=["dance", "stage"],
+        ),
+    )
+
+    decision = review_service.create_auto_approved_review_decision(
+        db,
+        media=media,
+        commit=False,
+    )
+
+    assert db.added is decision
+    assert db.committed is False
+    assert decision.media_id == media_id
+    assert decision.status == "approved"
+    assert decision.final_primary_folder == "Highlights"
+    assert decision.final_sub_folder == "Stage"
+    assert decision.final_tags == ["dance", "stage"]
+    assert decision.include_in_export is True
+    assert decision.review_reasons == []
+    assert decision.reviewed_at is not None
 
 
 def test_apply_review_decision_marks_approved_media_processed() -> None:

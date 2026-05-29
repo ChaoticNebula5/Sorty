@@ -86,15 +86,24 @@ def test_search_returns_ranked_media(monkeypatch) -> None:
     result = search_service.SearchResult(media=media, score=0.91)
 
     monkeypatch.setattr(event_service, "get_event", lambda db, event_id: object())
-    monkeypatch.setattr(
-        search_service,
-        "search_event_media",
-        lambda db, event_id, query, limit=20, offset=0: [result],
-    )
+    captured_filters: list[search_service.SearchFilters] = []
+
+    def fake_search_event_media(
+        db,
+        event_id,
+        query,
+        limit=20,
+        offset=0,
+        filters=None,
+    ):
+        captured_filters.append(filters)
+        return [result]
+
+    monkeypatch.setattr(search_service, "search_event_media", fake_search_event_media)
     monkeypatch.setattr(
         search_service,
         "count_searchable_event_media",
-        lambda db, event_id: 1,
+        lambda db, event_id, filters=None: 1,
     )
     app.dependency_overrides[get_db] = override_db
 
@@ -120,3 +129,57 @@ def test_search_returns_ranked_media(monkeypatch) -> None:
     assert item["review_status"] == "approved"
     assert item["include_in_export"] is True
     assert item["score"] == 0.91
+    assert captured_filters == [search_service.SearchFilters()]
+
+
+def test_search_passes_filter_params_to_service(monkeypatch) -> None:
+    event_id = uuid.uuid4()
+    captured: dict[str, search_service.SearchFilters | None] = {}
+
+    def fake_search_event_media(
+        db,
+        event_id,
+        query,
+        limit=20,
+        offset=0,
+        filters=None,
+    ):
+        captured["search"] = filters
+        return []
+
+    def fake_count_searchable_event_media(db, event_id, filters=None):
+        captured["count"] = filters
+        return 0
+
+    monkeypatch.setattr(event_service, "get_event", lambda db, event_id: object())
+    monkeypatch.setattr(search_service, "search_event_media", fake_search_event_media)
+    monkeypatch.setattr(
+        search_service,
+        "count_searchable_event_media",
+        fake_count_searchable_event_media,
+    )
+    app.dependency_overrides[get_db] = override_db
+
+    try:
+        response = TestClient(app).get(
+            f"/api/events/{event_id}/search",
+            headers=auth_headers(),
+            params={
+                "q": "stage",
+                "include_duplicates": "true",
+                "include_blurry": "false",
+                "include_pending": "false",
+                "export_ready_only": "true",
+            },
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    expected = search_service.SearchFilters(
+        include_duplicates=True,
+        include_blurry=False,
+        include_pending=False,
+        export_ready_only=True,
+    )
+    assert response.status_code == 200
+    assert captured == {"search": expected, "count": expected}

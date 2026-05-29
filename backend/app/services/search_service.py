@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.db.models import MediaAsset, MediaEmbedding
+from app.db.models import MediaAsset, MediaEmbedding, QualitySignal, ReviewDecision
 
 MEDIA_EMBEDDING_DIMENSION = 384
 
@@ -16,6 +16,14 @@ MEDIA_EMBEDDING_DIMENSION = 384
 class SearchResult:
     media: MediaAsset
     score: float
+
+
+@dataclass(frozen=True)
+class SearchFilters:
+    include_duplicates: bool = False
+    include_blurry: bool = True
+    include_pending: bool = False
+    export_ready_only: bool = True
 
 
 class MockEmbeddingProvider:
@@ -113,17 +121,24 @@ def search_event_media(
     query: str,
     limit: int = 20,
     offset: int = 0,
+    filters: SearchFilters | None = None,
     provider: MockEmbeddingProvider | None = None,
 ) -> list[SearchResult]:
     provider = provider or get_embedding_provider()
+    filters = filters or SearchFilters()
     query_embedding = provider.embed_text(query)
     distance = MediaEmbedding.embedding.cosine_distance(query_embedding).label("distance")
-
-    rows = db.execute(
+    statement = (
         select(MediaAsset, distance)
         .join(MediaAsset.media_embedding)
+        .outerjoin(MediaAsset.quality_signal)
+        .outerjoin(MediaAsset.review_decision)
         .where(MediaAsset.event_id == event_id)
-        .order_by(distance.asc(), MediaAsset.created_at.desc())
+    )
+    statement = apply_search_filters(statement, filters)
+
+    rows = db.execute(
+        statement.order_by(distance.asc(), MediaAsset.created_at.desc())
         .limit(limit)
         .offset(offset)
     ).all()
@@ -134,10 +149,47 @@ def search_event_media(
     ]
 
 
-def count_searchable_event_media(db: Session, event_id: uuid.UUID) -> int:
-    return db.scalar(
+def count_searchable_event_media(
+    db: Session,
+    event_id: uuid.UUID,
+    filters: SearchFilters | None = None,
+) -> int:
+    filters = filters or SearchFilters()
+    statement = (
         select(func.count())
         .select_from(MediaEmbedding)
         .join(MediaEmbedding.media)
+        .outerjoin(MediaAsset.quality_signal)
+        .outerjoin(MediaAsset.review_decision)
         .where(MediaAsset.event_id == event_id)
-    ) or 0
+    )
+    statement = apply_search_filters(statement, filters)
+
+    return db.scalar(statement) or 0
+
+
+def apply_search_filters(statement, filters: SearchFilters):
+    if not filters.include_duplicates:
+        statement = statement.where(
+            (QualitySignal.id.is_(None)) | (QualitySignal.is_duplicate.is_(False))
+        )
+
+    if not filters.include_blurry:
+        statement = statement.where(
+            (QualitySignal.id.is_(None))
+            | (QualitySignal.quality_label.is_(None))
+            | (QualitySignal.quality_label != "blurry")
+        )
+
+    if not filters.include_pending:
+        statement = statement.where(
+            (ReviewDecision.id.is_(None)) | (ReviewDecision.status != "pending")
+        )
+
+    if filters.export_ready_only:
+        statement = statement.where(
+            ReviewDecision.status.in_(("approved", "edited")),
+            ReviewDecision.include_in_export.is_(True),
+        )
+
+    return statement

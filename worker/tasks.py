@@ -105,27 +105,33 @@ def process_batch_job(payload: dict[str, Any]) -> str:
                     ):
                         review_reasons.append("possible_duplicate")
 
-                    search_service.upsert_media_embedding(db, media, commit=False)
-
                     if result.needs_review or review_reasons:
-                        review_service.create_pending_review_decision(
+                        review_decision = review_service.create_pending_review_decision(
                             db,
                             media_id=media.id,
                             review_reasons=review_reasons,
                             commit=False,
                         )
+                        media.review_decision = review_decision
                         media_service.mark_media_needs_review(
                             db,
                             media,
                             reason=", ".join(review_reasons) or "needs_review",
                             commit=False,
                         )
-                        db.commit()
                         needs_review_count += 1
                     else:
+                        review_decision = review_service.create_auto_approved_review_decision(
+                            db,
+                            media=media,
+                            commit=False,
+                        )
+                        media.review_decision = review_decision
                         media_service.mark_media_processed(db, media, commit=False)
-                        db.commit()
                         processed_files += 1
+
+                    search_service.upsert_media_embedding(db, media, commit=False)
+                    db.commit()
                 except Exception as media_exc:
                     db.rollback()
                     failed_files += 1

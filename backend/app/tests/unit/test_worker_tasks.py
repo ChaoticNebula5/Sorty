@@ -87,6 +87,14 @@ def fake_quality_service(monkeypatch) -> None:
         "detect_duplicate_for_media",
         lambda db, media_id, event_id, perceptual_hash, batch_job_id=None, commit=True: duplicate_result,
     )
+    monkeypatch.setattr(
+        tasks.review_service,
+        "create_auto_approved_review_decision",
+        lambda db, media, commit=True: SimpleNamespace(
+            status="approved",
+            include_in_export=True,
+        ),
+    )
 
 
 def test_process_batch_job_marks_job_media_and_analysis_completed(
@@ -146,6 +154,12 @@ def test_process_batch_job_marks_job_media_and_analysis_completed(
         lambda *args, **kwargs: calls.append("analysis_saved"),
     )
     monkeypatch.setattr(
+        tasks.review_service,
+        "create_auto_approved_review_decision",
+        lambda db, media, commit=True: calls.append("auto_review_saved")
+        or SimpleNamespace(status="approved", include_in_export=True),
+    )
+    monkeypatch.setattr(
         tasks.search_service,
         "upsert_media_embedding",
         lambda db, media, commit=True: calls.append("embedding_saved"),
@@ -175,8 +189,9 @@ def test_process_batch_job_marks_job_media_and_analysis_completed(
         "job_processing",
         "single_media_processing",
         "analysis_saved",
-        "embedding_saved",
+        "auto_review_saved",
         "single_media_processed",
+        "embedding_saved",
         "job_finished:1:0:0",
         "graph:0",
     ]
