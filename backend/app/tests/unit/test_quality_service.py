@@ -225,6 +225,48 @@ def test_detect_duplicate_for_media_creates_duplicate_group() -> None:
     assert duplicate_group.group_size == 2
 
 
+def test_detect_duplicate_for_media_reuses_supplied_quality_signal(monkeypatch) -> None:
+    media_id = uuid.uuid4()
+    event_id = uuid.uuid4()
+    quality_signal = SimpleNamespace(
+        media_id=media_id,
+        perceptual_hash=None,
+        is_duplicate=False,
+        duplicate_distance=None,
+        duplicate_group_id=None,
+    )
+
+    class FakeResult:
+        def all(self):
+            return []
+
+    class FakeDbNoFetch(FakeDb):
+        def scalar(self, statement):
+            raise AssertionError("quality signal should not be fetched again")
+
+        def execute(self, statement):
+            return FakeResult()
+
+    monkeypatch.setattr(
+        quality_service,
+        "lock_event_for_duplicate_detection",
+        lambda db, event_id: None,
+    )
+
+    result = quality_service.detect_duplicate_for_media(
+        FakeDbNoFetch(),
+        media_id=media_id,
+        event_id=event_id,
+        perceptual_hash="f" * 16,
+        quality_signal=quality_signal,
+        commit=False,
+    )
+
+    assert result.is_duplicate is False
+    assert quality_signal.perceptual_hash == "f" * 16
+    assert quality_signal.is_duplicate is False
+
+
 def test_lock_event_for_duplicate_detection_skips_non_postgres_db() -> None:
     engine = create_engine("sqlite+pysqlite:///:memory:")
     Session = sessionmaker(bind=engine)

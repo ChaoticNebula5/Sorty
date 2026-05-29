@@ -97,11 +97,12 @@ def detect_duplicate_for_media(
     event_id: uuid.UUID,
     perceptual_hash: str,
     batch_job_id: uuid.UUID | None = None,
+    quality_signal: QualitySignal | None = None,
     commit: bool = True,
 ) -> DuplicateDetectionResult:
     settings = get_settings()
     threshold = settings.phash_duplicate_threshold
-    quality_signal = _get_quality_signal(db, media_id)
+    quality_signal = quality_signal or _get_quality_signal(db, media_id)
     lock_event_for_duplicate_detection(db, event_id)
 
     best_match: tuple[QualitySignal, MediaAsset, int] | None = None

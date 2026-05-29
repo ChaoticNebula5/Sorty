@@ -97,6 +97,7 @@ def process_batch_job(payload: dict[str, Any]) -> str:
                         event_id=media.event_id,
                         perceptual_hash=quality_result.perceptual_hash,
                         batch_job_id=job.id,
+                        quality_signal=quality_signal,
                         commit=False,
                     )
                     if (
@@ -105,6 +106,7 @@ def process_batch_job(payload: dict[str, Any]) -> str:
                     ):
                         review_reasons.append("possible_duplicate")
 
+                    media_outcome = "processed"
                     if result.needs_review or review_reasons:
                         review_decision = review_service.create_pending_review_decision(
                             db,
@@ -119,7 +121,7 @@ def process_batch_job(payload: dict[str, Any]) -> str:
                             reason=", ".join(review_reasons) or "needs_review",
                             commit=False,
                         )
-                        needs_review_count += 1
+                        media_outcome = "needs_review"
                     else:
                         review_decision = review_service.create_auto_approved_review_decision(
                             db,
@@ -128,10 +130,13 @@ def process_batch_job(payload: dict[str, Any]) -> str:
                         )
                         media.review_decision = review_decision
                         media_service.mark_media_processed(db, media, commit=False)
-                        processed_files += 1
 
                     search_service.upsert_media_embedding(db, media, commit=False)
                     db.commit()
+                    if media_outcome == "needs_review":
+                        needs_review_count += 1
+                    else:
+                        processed_files += 1
                 except Exception as media_exc:
                     db.rollback()
                     failed_files += 1

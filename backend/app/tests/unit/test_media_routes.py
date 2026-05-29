@@ -109,6 +109,7 @@ def make_media(**overrides: object) -> SimpleNamespace:
         "size_bytes": 123,
         "upload_status": "accepted",
         "processing_status": "uploaded",
+        "processing_error": None,
         "created_at": now,
         "updated_at": now,
     }
@@ -458,6 +459,30 @@ def test_get_media_returns_item(monkeypatch) -> None:
     assert body["data"]["id"] == str(media.id)
     assert body["data"]["file_url"] == f"/api/media/{media.id}/file"
     assert body["data"]["quality"] is None
+
+
+def test_get_media_exposes_processing_error(monkeypatch) -> None:
+    media = make_media(
+        processing_status="failed",
+        processing_error="quality signal insert failed",
+        quality_signal=None,
+    )
+
+    monkeypatch.setattr(media_service, "get_media_asset", lambda db, media_id: media)
+    app.dependency_overrides[get_db] = override_db
+
+    try:
+        response = TestClient(app).get(
+            f"/api/media/{media.id}",
+            headers=auth_headers(),
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["processing_status"] == "failed"
+    assert body["data"]["processing_error"] == "quality signal insert failed"
 
 
 def test_get_media_returns_404(monkeypatch) -> None:

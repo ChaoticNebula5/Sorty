@@ -31,6 +31,7 @@ class MediaAssetRead(BaseModel):
     size_bytes: int
     upload_status: str
     processing_status: str
+    processing_error: str | None = None
     quality: MediaQualityRead | None = None
     thumbnail_url: str | None = None
     file_url: str | None = None
