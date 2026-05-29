@@ -147,3 +147,34 @@ def test_build_postgres_checkpointer_respects_auto_setup_setting(monkeypatch) ->
 
     assert isinstance(checkpointer, FakeCheckpointer)
     assert setup_called == []
+
+
+def test_build_postgres_checkpointer_can_run_auto_setup(monkeypatch) -> None:
+    setup_called = []
+
+    class FakeCheckpointer:
+        def setup(self):
+            setup_called.append(True)
+
+    @contextmanager
+    def fake_from_conn_string(conninfo):
+        yield FakeCheckpointer()
+
+    monkeypatch.setattr(
+        mediaops_graph,
+        "get_settings",
+        lambda: SimpleNamespace(
+            database_url="postgresql+psycopg://sorty:sorty@postgres:5432/sorty",
+            langgraph_auto_setup_checkpointer=True,
+        ),
+    )
+    monkeypatch.setattr(
+        mediaops_graph.PostgresSaver,
+        "from_conn_string",
+        fake_from_conn_string,
+    )
+
+    checkpointer = mediaops_graph.build_postgres_checkpointer()
+
+    assert isinstance(checkpointer, FakeCheckpointer)
+    assert setup_called == [True]
