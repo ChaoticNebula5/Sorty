@@ -60,6 +60,28 @@ class FakeVisionProvider:
         )
 
 
+@pytest.fixture(autouse=True)
+def fake_quality_service(monkeypatch) -> None:
+    quality_result = SimpleNamespace(
+        blur_score=240.0,
+        quality_label="sharp",
+        image_width=100,
+        image_height=100,
+    )
+    quality_signal = SimpleNamespace(quality_label="sharp", is_duplicate=False)
+
+    monkeypatch.setattr(
+        tasks.quality_service,
+        "analyze_image_quality",
+        lambda image_path: quality_result,
+    )
+    monkeypatch.setattr(
+        tasks.quality_service,
+        "upsert_quality_signal",
+        lambda db, media_id, result, commit=True: quality_signal,
+    )
+
+
 def test_process_batch_job_marks_job_media_and_analysis_completed(
     monkeypatch,
     tmp_path,
@@ -156,6 +178,98 @@ def test_process_batch_job_marks_job_media_and_analysis_completed(
         "name": "Cultural Fest",
         "event_type": "cultural",
     }
+
+
+def test_process_batch_job_sends_blurry_media_to_review(monkeypatch, tmp_path) -> None:
+    fake_db = FakeSession()
+    job = SimpleNamespace(
+        id=uuid.uuid4(),
+        event_id=uuid.uuid4(),
+        langgraph_thread_id="thread-1",
+    )
+    media = SimpleNamespace(
+        id=uuid.uuid4(),
+        event_id=job.event_id,
+        original_object_key="events/event-id/originals/blurry.jpg",
+    )
+    quality_result = SimpleNamespace(
+        blur_score=10.0,
+        quality_label="blurry",
+        image_width=100,
+        image_height=100,
+    )
+    calls: list[str] = []
+
+    monkeypatch.setattr(tasks, "SessionLocal", lambda: fake_db)
+    monkeypatch.setattr(tasks.job_service, "get_batch_job", lambda db, job_id: job)
+    monkeypatch.setattr(tasks.event_service, "get_event", lambda db, event_id: None)
+    monkeypatch.setattr(tasks.job_service, "mark_job_processing", lambda db, job: None)
+    monkeypatch.setattr(
+        tasks.storage_factory,
+        "get_storage_service",
+        lambda: FakeStorage(tmp_path / "blurry.jpg"),
+    )
+    monkeypatch.setattr(
+        tasks.vision_service,
+        "get_vision_provider",
+        lambda: FakeVisionProvider(),
+    )
+    monkeypatch.setattr(
+        tasks.media_service,
+        "list_batch_media",
+        lambda db, job_id, media_ids=None: [media],
+    )
+    monkeypatch.setattr(tasks.media_service, "mark_media_processing", lambda db, media: None)
+    monkeypatch.setattr(tasks.analysis_service, "upsert_ai_analysis", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        tasks.quality_service,
+        "analyze_image_quality",
+        lambda image_path: quality_result,
+    )
+    monkeypatch.setattr(
+        tasks.quality_service,
+        "upsert_quality_signal",
+        lambda db, media_id, result, commit=True: SimpleNamespace(
+            quality_label=result.quality_label,
+        ),
+    )
+    monkeypatch.setattr(tasks.search_service, "upsert_media_embedding", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        tasks.review_service,
+        "create_pending_review_decision",
+        lambda db, media_id, review_reasons, commit=True: calls.append(
+            f"review:{','.join(review_reasons)}"
+        ),
+    )
+    monkeypatch.setattr(
+        tasks.media_service,
+        "mark_media_needs_review",
+        lambda db, media, reason=None, commit=True: calls.append(
+            f"needs_review:{reason}"
+        ),
+    )
+    monkeypatch.setattr(
+        tasks.job_service,
+        "mark_job_finished",
+        lambda db, job, processed_files, failed_files, needs_review_count: calls.append(
+            f"finished:{processed_files}:{failed_files}:{needs_review_count}"
+        ),
+    )
+    monkeypatch.setattr(
+        tasks,
+        "run_mediaops_batch",
+        lambda **kwargs: calls.append("graph"),
+    )
+
+    result = tasks.process_batch_job({"job_id": str(job.id)})
+
+    assert result == str(job.id)
+    assert calls == [
+        "review:low_quality_blur",
+        "needs_review:low_quality_blur",
+        "finished:0:0:1",
+        "graph",
+    ]
 
 
 def test_process_batch_job_marks_job_and_media_failed(monkeypatch) -> None:

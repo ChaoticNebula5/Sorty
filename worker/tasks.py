@@ -10,6 +10,7 @@ from app.services import (
     export_service,
     job_service,
     media_service,
+    quality_service,
     review_service,
     search_service,
     storage_factory,
@@ -76,18 +77,33 @@ def process_batch_job(payload: dict[str, Any]) -> str:
                         commit=False,
                     )
                     media.ai_analysis = analysis
+                    quality_result = quality_service.analyze_image_quality(temp_path)
+                    quality_signal = quality_service.upsert_quality_signal(
+                        db,
+                        media_id=media.id,
+                        result=quality_result,
+                        commit=False,
+                    )
+                    media.quality_signal = quality_signal
                     search_service.upsert_media_embedding(db, media, commit=False)
-                    if result.needs_review:
+                    review_reasons = list(result.review_reasons or [])
+                    if (
+                        quality_result.quality_label == "blurry"
+                        and "low_quality_blur" not in review_reasons
+                    ):
+                        review_reasons.append("low_quality_blur")
+
+                    if result.needs_review or review_reasons:
                         review_service.create_pending_review_decision(
                             db,
                             media_id=media.id,
-                            review_reasons=result.review_reasons,
+                            review_reasons=review_reasons,
                             commit=False,
                         )
                         media_service.mark_media_needs_review(
                             db,
                             media,
-                            reason=", ".join(result.review_reasons) or "needs_review",
+                            reason=", ".join(review_reasons) or "needs_review",
                             commit=False,
                         )
                         db.commit()
