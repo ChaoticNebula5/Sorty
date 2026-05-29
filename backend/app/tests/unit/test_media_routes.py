@@ -397,7 +397,20 @@ def test_batch_upload_first_storage_write_failure_cleans_up_media(monkeypatch) -
 
 def test_list_event_media_returns_items(monkeypatch) -> None:
     event_id = uuid.uuid4()
-    media = make_media(event_id=event_id)
+    media = make_media(
+        event_id=event_id,
+        quality_signal=SimpleNamespace(
+            blur_score=42.5,
+            quality_label="blurry",
+            image_width=640,
+            image_height=480,
+            is_duplicate=True,
+            duplicate_distance=2,
+            duplicate_group_id=uuid.uuid4(),
+            exif_camera_make="Canon",
+            exif_camera_model="M50",
+        ),
+    )
 
     monkeypatch.setattr(event_service, "get_event", lambda db, event_id: object())
     monkeypatch.setattr(
@@ -421,10 +434,13 @@ def test_list_event_media_returns_items(monkeypatch) -> None:
     assert body["pagination"] == {"limit": 50, "offset": 0, "total": 1}
     assert body["data"][0]["id"] == str(media.id)
     assert body["data"][0]["thumbnail_url"] == f"/api/media/{media.id}/thumbnail"
+    assert body["data"][0]["quality"]["quality_label"] == "blurry"
+    assert body["data"][0]["quality"]["is_duplicate"] is True
+    assert body["data"][0]["quality"]["image_width"] == 640
 
 
 def test_get_media_returns_item(monkeypatch) -> None:
-    media = make_media()
+    media = make_media(quality_signal=None)
 
     monkeypatch.setattr(media_service, "get_media_asset", lambda db, media_id: media)
     app.dependency_overrides[get_db] = override_db
@@ -441,6 +457,7 @@ def test_get_media_returns_item(monkeypatch) -> None:
     body = response.json()
     assert body["data"]["id"] == str(media.id)
     assert body["data"]["file_url"] == f"/api/media/{media.id}/file"
+    assert body["data"]["quality"] is None
 
 
 def test_get_media_returns_404(monkeypatch) -> None:

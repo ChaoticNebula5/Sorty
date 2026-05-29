@@ -7,7 +7,12 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_api_key
 from app.schemas.common import APIListResponse, APIResponse, Pagination
-from app.schemas.media import BatchUploadRejectedItem, BatchUploadResponse, MediaAssetRead
+from app.schemas.media import (
+    BatchUploadRejectedItem,
+    BatchUploadResponse,
+    MediaAssetRead,
+    MediaQualityRead,
+)
 from app.services import event_service, job_service, media_service, queue_service, storage_factory
 from app.services.media_service import MediaAssetCreate
 from app.services.storage_service import StorageService
@@ -26,6 +31,9 @@ router = APIRouter(
 
 def media_to_read(media) -> MediaAssetRead:
     item = MediaAssetRead.model_validate(media)
+    quality_signal = getattr(media, "quality_signal", None)
+    if quality_signal is not None:
+        item.quality = MediaQualityRead.model_validate(quality_signal)
     item.thumbnail_url = f"/api/media/{media.id}/thumbnail"
     item.file_url = f"/api/media/{media.id}/file"
     return item
