@@ -5,7 +5,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.db.models import MediaAsset
+from app.db.models import MediaAsset, QualitySignal, ReviewDecision
 
 
 @dataclass(frozen=True)
@@ -17,6 +17,21 @@ class MediaAssetCreate:
     size_bytes: int
     sha256_hash: str | None = None
     batch_job_id: uuid.UUID | None = None
+
+
+@dataclass(frozen=True)
+class EventMediaSummaryData:
+    event_id: uuid.UUID
+    total_media: int
+    processed_media: int
+    needs_review_media: int
+    failed_media: int
+    blurry_media: int
+    possible_duplicate_media: int
+    pending_review_decisions: int
+    approved_review_decisions: int
+    rejected_review_decisions: int
+    confirmed_duplicate_decisions: int
 
 
 def build_original_object_key(
@@ -204,5 +219,98 @@ def count_event_media(db: Session, event_id: uuid.UUID) -> int:
     ) or 0
 
 
+def get_event_media_summary(
+    db: Session,
+    event_id: uuid.UUID,
+) -> EventMediaSummaryData:
+    return EventMediaSummaryData(
+        event_id=event_id,
+        total_media=_count_event_media_where(db, event_id),
+        processed_media=_count_event_media_where(
+            db,
+            event_id,
+            MediaAsset.processing_status == "processed",
+        ),
+        needs_review_media=_count_event_media_where(
+            db,
+            event_id,
+            MediaAsset.processing_status == "needs_review",
+        ),
+        failed_media=_count_event_media_where(
+            db,
+            event_id,
+            MediaAsset.processing_status == "failed",
+        ),
+        blurry_media=_count_quality_signals_where(
+            db,
+            event_id,
+            QualitySignal.quality_label == "blurry",
+        ),
+        possible_duplicate_media=_count_quality_signals_where(
+            db,
+            event_id,
+            QualitySignal.is_duplicate.is_(True),
+        ),
+        pending_review_decisions=_count_review_decisions_where(
+            db,
+            event_id,
+            ReviewDecision.status == "pending",
+        ),
+        approved_review_decisions=_count_review_decisions_where(
+            db,
+            event_id,
+            ReviewDecision.status == "approved",
+        ),
+        rejected_review_decisions=_count_review_decisions_where(
+            db,
+            event_id,
+            ReviewDecision.status == "rejected",
+        ),
+        confirmed_duplicate_decisions=_count_review_decisions_where(
+            db,
+            event_id,
+            ReviewDecision.status == "duplicate",
+        ),
+    )
+
+
 def get_media_asset(db: Session, media_id: uuid.UUID) -> MediaAsset | None:
     return db.scalar(select(MediaAsset).where(MediaAsset.id == media_id))
+
+
+def _count_event_media_where(db: Session, event_id: uuid.UUID, *conditions) -> int:
+    statement = (
+        select(func.count())
+        .select_from(MediaAsset)
+        .where(MediaAsset.event_id == event_id)
+    )
+    for condition in conditions:
+        statement = statement.where(condition)
+
+    return db.scalar(statement) or 0
+
+
+def _count_quality_signals_where(db: Session, event_id: uuid.UUID, *conditions) -> int:
+    statement = (
+        select(func.count())
+        .select_from(QualitySignal)
+        .join(QualitySignal.media)
+        .where(MediaAsset.event_id == event_id)
+    )
+    for condition in conditions:
+        statement = statement.where(condition)
+
+    return db.scalar(statement) or 0
+
+
+def _count_review_decisions_where(db: Session, event_id: uuid.UUID, *conditions) -> int:
+    statement = (
+        select(func.count())
+        .select_from(ReviewDecision)
+        .join(ReviewDecision.media)
+        .where(MediaAsset.event_id == event_id)
+    )
+    for condition in conditions:
+        statement = statement.where(condition)
+
+    return db.scalar(statement) or 0

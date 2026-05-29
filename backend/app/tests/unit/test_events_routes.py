@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_db
-from app.api.routes_events import event_service, job_service
+from app.api.routes_events import event_service, job_service, media_service
 from app.core.config import get_settings
 from app.main import app
 
@@ -199,6 +199,63 @@ def test_list_event_jobs_requires_api_key() -> None:
 
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "missing_api_key"
+
+
+def test_get_event_media_summary_returns_counts(monkeypatch) -> None:
+    event = make_event()
+    summary = media_service.EventMediaSummaryData(
+        event_id=event.id,
+        total_media=10,
+        processed_media=6,
+        needs_review_media=2,
+        failed_media=1,
+        blurry_media=2,
+        possible_duplicate_media=1,
+        pending_review_decisions=2,
+        approved_review_decisions=5,
+        rejected_review_decisions=1,
+        confirmed_duplicate_decisions=1,
+    )
+
+    monkeypatch.setattr(event_service, "get_event", lambda db, event_id: event)
+    monkeypatch.setattr(
+        media_service,
+        "get_event_media_summary",
+        lambda db, event_id: summary,
+    )
+    app.dependency_overrides[get_db] = override_db
+
+    try:
+        response = TestClient(app).get(
+            f"/api/events/{event.id}/media-summary",
+            headers=auth_headers(),
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["error"] is None
+    assert body["data"]["event_id"] == str(event.id)
+    assert body["data"]["total_media"] == 10
+    assert body["data"]["blurry_media"] == 2
+    assert body["data"]["possible_duplicate_media"] == 1
+
+
+def test_get_event_media_summary_returns_404_for_missing_event(monkeypatch) -> None:
+    monkeypatch.setattr(event_service, "get_event", lambda db, event_id: None)
+    app.dependency_overrides[get_db] = override_db
+
+    try:
+        response = TestClient(app).get(
+            f"/api/events/{uuid.uuid4()}/media-summary",
+            headers=auth_headers(),
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 404
+    assert response.json()["error"]["code"] == "event_not_found"
 
 
 def test_list_event_jobs_returns_pagination(monkeypatch) -> None:

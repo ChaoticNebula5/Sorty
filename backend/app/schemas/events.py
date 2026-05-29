@@ -23,3 +23,19 @@ class EventRead(BaseModel):
     created_at: datetime
     updated_at: datetime
     archived_at: datetime | None
+
+
+class EventMediaSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    event_id: uuid.UUID
+    total_media: int
+    processed_media: int
+    needs_review_media: int
+    failed_media: int
+    blurry_media: int
+    possible_duplicate_media: int
+    pending_review_decisions: int
+    approved_review_decisions: int
+    rejected_review_decisions: int
+    confirmed_duplicate_decisions: int

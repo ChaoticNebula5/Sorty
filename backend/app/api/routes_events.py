@@ -5,9 +5,9 @@ from sqlalchemy.orm import Session
 
 from app.api.deps import get_db, require_api_key
 from app.schemas.common import APIListResponse, APIResponse, Pagination
-from app.schemas.events import EventCreate, EventRead
+from app.schemas.events import EventCreate, EventMediaSummary, EventRead
 from app.schemas.jobs import BatchJobRead
-from app.services import event_service, job_service
+from app.services import event_service, job_service, media_service
 
 router = APIRouter(
     prefix="/api/events",
@@ -63,6 +63,30 @@ def get_event(
 
     return APIResponse(
         data=EventRead.model_validate(event),
+        error=None,
+    )
+
+
+@router.get("/{event_id}/media-summary")
+def get_event_media_summary(
+    event_id: uuid.UUID,
+    db: Session = Depends(get_db),
+) -> APIResponse:
+    event = event_service.get_event(db, event_id)
+    if event is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "event_not_found",
+                "message": "Event not found.",
+                "details": {"event_id": str(event_id)},
+            },
+        )
+
+    summary = media_service.get_event_media_summary(db, event_id)
+
+    return APIResponse(
+        data=EventMediaSummary.model_validate(summary),
         error=None,
     )
 
