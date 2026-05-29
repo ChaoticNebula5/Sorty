@@ -25,6 +25,30 @@ def test_run_mediaops_batch_finishes_when_no_review_needed() -> None:
     assert result["reviewed"] is False
 
 
+def test_graph_result_from_final_state_returns_finalized_result() -> None:
+    job_id = str(uuid.uuid4())
+    event_id = str(uuid.uuid4())
+
+    result = mediaops_graph.graph_result_from_invoke(
+        thread_id="thread-1",
+        result={
+            "job_id": job_id,
+            "event_id": event_id,
+            "needs_review_count": 0,
+            "reviewed": False,
+            "phase": "finalized",
+        },
+    )
+
+    assert result == mediaops_graph.MediaOpsGraphResult(
+        status="finalized",
+        thread_id="thread-1",
+        job_id=job_id,
+        event_id=event_id,
+        pending_review_count=0,
+    )
+
+
 def test_mediaops_graph_interrupts_and_resumes_review_checkpoint() -> None:
     graph = mediaops_graph.build_mediaops_graph(checkpointer=MemorySaver())
     thread_id = f"batch-{uuid.uuid4()}"
@@ -51,6 +75,12 @@ def test_mediaops_graph_interrupts_and_resumes_review_checkpoint() -> None:
         "event_id": event_id,
         "pending_review_count": 2,
     }
+    graph_result = mediaops_graph.graph_result_from_invoke(
+        thread_id=thread_id,
+        result=interrupted,
+    )
+    assert graph_result.status == "interrupted_for_review"
+    assert graph_result.pending_review_count == 2
 
     resumed = graph.invoke(Command(resume={"reviewed": True}), config=config)
 

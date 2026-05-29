@@ -1,4 +1,5 @@
-from typing import Any, TypedDict
+from dataclasses import dataclass
+from typing import Any, Literal, TypedDict
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.checkpoint.postgres import PostgresSaver
@@ -14,6 +15,15 @@ class MediaOpsState(TypedDict):
     needs_review_count: int
     reviewed: bool
     phase: str
+
+
+@dataclass(frozen=True)
+class MediaOpsGraphResult:
+    status: Literal["finalized", "interrupted_for_review"]
+    thread_id: str
+    job_id: str
+    event_id: str
+    pending_review_count: int
 
 
 _compiled_graph = None
@@ -98,7 +108,7 @@ def run_mediaops_batch(
         raise ValueError("Event id is required.")
 
     graph = get_mediaops_graph()
-    return graph.invoke(
+    result = graph.invoke(
         {
             "job_id": job_id,
             "event_id": event_id,
@@ -108,6 +118,7 @@ def run_mediaops_batch(
         },
         config={"configurable": {"thread_id": thread_id}},
     )
+    return graph_result_from_invoke(thread_id=thread_id, result=result)
 
 
 def resume_reviewed_batch(thread_id: str, job_id: str) -> None:
@@ -120,4 +131,29 @@ def resume_reviewed_batch(thread_id: str, job_id: str) -> None:
     graph.invoke(
         Command(resume={"reviewed": True, "job_id": job_id}),
         config={"configurable": {"thread_id": thread_id}},
+    )
+
+
+def graph_result_from_invoke(
+    *,
+    thread_id: str,
+    result: dict[str, Any],
+) -> MediaOpsGraphResult:
+    interrupt_items = result.get("__interrupt__")
+    if interrupt_items:
+        payload = interrupt_items[0].value
+        return MediaOpsGraphResult(
+            status="interrupted_for_review",
+            thread_id=thread_id,
+            job_id=str(payload["job_id"]),
+            event_id=str(payload["event_id"]),
+            pending_review_count=int(payload["pending_review_count"]),
+        )
+
+    return MediaOpsGraphResult(
+        status="finalized",
+        thread_id=thread_id,
+        job_id=str(result["job_id"]),
+        event_id=str(result["event_id"]),
+        pending_review_count=int(result["needs_review_count"]),
     )
