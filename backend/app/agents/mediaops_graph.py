@@ -41,7 +41,8 @@ def build_postgres_checkpointer():
     conninfo = sqlalchemy_url_to_psycopg_conninfo(settings.database_url)
     _checkpointer_context = PostgresSaver.from_conn_string(conninfo)
     checkpointer = _checkpointer_context.__enter__()
-    checkpointer.setup()
+    if settings.langgraph_auto_setup_checkpointer:
+        checkpointer.setup()
     return checkpointer
 
 

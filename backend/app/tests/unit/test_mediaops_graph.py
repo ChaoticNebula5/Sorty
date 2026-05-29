@@ -1,4 +1,6 @@
 import uuid
+from contextlib import contextmanager
+from types import SimpleNamespace
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
@@ -114,3 +116,34 @@ def test_sqlalchemy_url_to_psycopg_conninfo_removes_sqlalchemy_driver() -> None:
     )
 
     assert conninfo == "postgresql://sorty:sorty@postgres:5432/sorty"
+
+
+def test_build_postgres_checkpointer_respects_auto_setup_setting(monkeypatch) -> None:
+    setup_called = []
+
+    class FakeCheckpointer:
+        def setup(self):
+            setup_called.append(True)
+
+    @contextmanager
+    def fake_from_conn_string(conninfo):
+        yield FakeCheckpointer()
+
+    monkeypatch.setattr(
+        mediaops_graph,
+        "get_settings",
+        lambda: SimpleNamespace(
+            database_url="postgresql+psycopg://sorty:sorty@postgres:5432/sorty",
+            langgraph_auto_setup_checkpointer=False,
+        ),
+    )
+    monkeypatch.setattr(
+        mediaops_graph.PostgresSaver,
+        "from_conn_string",
+        fake_from_conn_string,
+    )
+
+    checkpointer = mediaops_graph.build_postgres_checkpointer()
+
+    assert isinstance(checkpointer, FakeCheckpointer)
+    assert setup_called == []

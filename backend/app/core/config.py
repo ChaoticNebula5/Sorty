@@ -46,6 +46,8 @@ class Settings(BaseSettings):
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_dimension: int = 384
 
+    langgraph_auto_setup_checkpointer: bool = True
+
     rq_queue_name: str = "mediaops"
     job_poll_interval_seconds: int = 2
 
