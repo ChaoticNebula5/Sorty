@@ -5,9 +5,11 @@ __pycache__/
 .mypy_cache/
 .ruff_cache/
 *.pyc
+.tmp/
 
 sorty_ai_coding_bundle.zip
 Sorty_AI_FULL_BUILD_CONTEXT_PACK.md
+/docs
 
 storage/
 minio_data/
