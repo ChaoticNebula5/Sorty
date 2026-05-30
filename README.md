@@ -135,11 +135,11 @@ For Windows users, if pytest faces temp/cache permission issues, run tests with 
 ```powershell
 New-Item -ItemType Directory -Force .\.tmp\pytest | Out-Null
 
-$env:TEMP="C:\ProgrammingAndCoding\Sorty\.tmp"
-$env:TMP="C:\ProgrammingAndCoding\Sorty\.tmp"
+$env:TEMP=".tmp"
+$env:TMP=".tmp"
 
-.\.venv\Scripts\python.exe -m pytest backend/app/tests/unit `
-  --basetemp=C:\ProgrammingAndCoding\Sorty\.tmp\pytest `
+python -m pytest backend/app/tests/unit `
+  --basetemp=.tmp\pytest `
   -p no:cacheprovider
 ```
 
