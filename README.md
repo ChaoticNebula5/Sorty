@@ -1,98 +1,190 @@
 # Sorty AI
 
-Sorty AI is a backend-first Event MediaOps system for turning messy event photo dumps into reviewed, searchable, export-ready archives.
+Sorty AI is an AI-powered event media management backend that helps event teams upload, process, review, search, and export large batches of event photos.
 
-It follows the locked PRD/TRD direction:
+It is designed for college societies, hackathon teams, cultural fest teams, and social media teams that need to quickly organize raw event photos into clean, usable folders.
 
-- FastAPI backend with API-key auth
-- SQLAlchemy 2.0, Alembic, PostgreSQL, and pgvector
-- Redis + RQ background processing
-- MinIO object storage for originals, thumbnails, and export ZIPs
-- LangGraph checkpoint/resume workflow for human review
-- MockVisionProvider as the default AI provider
-- Blur and duplicate detection
-- pgvector-backed semantic search
-- Organized ZIP export with metadata
+---
 
-No JWT/OAuth is used. No ChromaDB, Pinecone, or Weaviate is used.
+## Features
 
-## Current Status
+* Batch image upload for event-based media libraries
+* AI-generated captions, tags, and folder suggestions
+* Blur and image quality detection
+* Duplicate photo detection using perceptual hashing
+* Human review workflow for blurry, duplicate, or uncertain images
+* Semantic media search using PostgreSQL and pgvector
+* ZIP export with organized folders, metadata CSV, and summary file
+* Background processing with Redis and RQ workers
+* Object storage using MinIO
+* Dockerized local development setup
+* Unit and integration test coverage
 
-Backend MVP is smoke-verified via the Docker-backed manual smoke test.
-The next work before a basic UI is:
+---
 
-- add a few integration tests around Postgres, MinIO, Redis/RQ, and export
-- optionally add Gemini behind the existing `VisionProvider`
-- build a minimal UI after backend flow is proven
+## Tech Stack
 
-## Quick Start
+* **Backend:** FastAPI, Python, SQLAlchemy, Pydantic
+* **Database:** PostgreSQL, pgvector, Alembic
+* **Queue:** Redis, RQ
+* **Storage:** MinIO
+* **AI Workflow:** LangGraph
+* **AI Providers:** Mock Vision Provider, Gemini Vision Provider
+* **Testing:** Pytest
+* **Deployment:** Docker, Docker Compose
 
-From the repository root:
+---
+
+## System Flow
+
+```text
+Create Event
+   ↓
+Upload Photos
+   ↓
+Background AI Processing
+   ↓
+Quality + Duplicate Detection
+   ↓
+Human Review
+   ↓
+Search / Browse Media
+   ↓
+Export Organized ZIP
+```
+
+---
+
+## Architecture
+
+```text
+FastAPI Backend
+   ├── PostgreSQL + pgvector
+   ├── Redis / RQ Worker
+   ├── MinIO Object Storage
+   └── LangGraph Review Workflow
+```
+
+The backend processes uploaded images asynchronously. Media files are stored in MinIO, metadata and embeddings are stored in PostgreSQL, and Redis/RQ handles background jobs.
+
+LangGraph is used to pause processing when human review is required and resume the workflow after review decisions are completed.
+
+---
+
+## Getting Started
+
+### 1. Clone the Repository
+
+```bash
+git clone https://github.com/ChaoticNebula5/Sorty.git
+cd Sorty
+```
+
+### 2. Create Environment File
+
+```bash
+cp .env.example .env
+```
+
+For Windows PowerShell:
 
 ```powershell
+Copy-Item .env.example .env
+```
+
+### 3. Start the Docker Stack
+
+```bash
 docker compose up --build
 ```
 
-In another terminal, run migrations:
+### 4. Run Database Migrations
 
-```powershell
+In another terminal:
+
+```bash
 docker compose run --rm backend alembic upgrade head
 ```
 
-Useful URLs:
+### 5. Open API Docs
 
-- Backend API: `http://localhost:8000`
-- OpenAPI docs: `http://localhost:8000/docs`
-- MinIO console: `http://localhost:9001`
-
-Default local credentials from `.env.example`:
-
-- API key: `demo-secret`
-- MinIO user: `sortyadmin`
-- MinIO password: `sortypassword`
-
-## Health Checks
-
-Liveness:
-
-```powershell
-curl.exe http://localhost:8000/api/health
+```text
+http://localhost:8000/docs
 ```
 
-Readiness:
+---
 
-```powershell
-curl.exe http://localhost:8000/api/ready
+## Running Tests
+
+### Unit Tests
+
+```bash
+python -m pytest backend/app/tests/unit
 ```
 
-`/api/ready` checks database, Redis, and storage reachability without exposing connection strings or secrets.
+### Integration Tests
 
-## Test Suite
+Start Docker services first, then run:
 
-Use the project virtual environment:
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest backend/app/tests/unit
+```bash
+python -m pytest backend/app/tests/integration -m integration
 ```
 
-At the time of writing, the unit suite has 191 passing tests.
+For Windows users, if pytest faces temp/cache permission issues, run tests with a local temp directory:
 
-## Main Backend Flow
+```powershell
+New-Item -ItemType Directory -Force .\.tmp\pytest | Out-Null
 
-1. Create an event.
-2. Upload a batch of images.
-3. Backend stores originals and thumbnails in MinIO.
-4. RQ worker processes the batch.
-5. MockVisionProvider generates AI metadata.
-6. Quality service scores blur and duplicate candidates.
-7. Clean images are auto-approved for export.
-8. Low-confidence, blurry, or duplicate-like images go to review.
-9. Review decisions resume the LangGraph workflow.
-10. Search uses pgvector embeddings.
-11. Export creates an organized ZIP in MinIO.
+$env:TEMP="C:\ProgrammingAndCoding\Sorty\.tmp"
+$env:TMP="C:\ProgrammingAndCoding\Sorty\.tmp"
 
-See [docs/MANUAL_SMOKE_TEST.md](docs/MANUAL_SMOKE_TEST.md) for a command-level walkthrough.
+.\.venv\Scripts\python.exe -m pytest backend/app/tests/unit `
+  --basetemp=C:\ProgrammingAndCoding\Sorty\.tmp\pytest `
+  -p no:cacheprovider
+```
 
-## Architecture Notes
+---
 
-See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for how FastAPI, RQ, MinIO, Postgres, pgvector, and LangGraph fit together.
+## Main API Flow
+
+```text
+POST /api/events
+POST /api/events/{event_id}/media/batch-upload
+GET  /api/jobs/{job_id}
+GET  /api/events/{event_id}/review-queue
+PATCH /api/media/{media_id}/review
+POST /api/jobs/{job_id}/resume
+GET  /api/events/{event_id}/search
+POST /api/events/{event_id}/export
+GET  /api/exports/{export_id}/download
+```
+
+---
+
+## Project Status
+
+* Backend MVP completed
+* Docker-based local setup completed
+* Worker-based media processing completed
+* Human review and resume workflow completed
+* Search and export workflow completed
+* Unit tests passing
+* Integration tests passing
+* Frontend pending
+
+---
+
+## Future Improvements
+
+* Build a minimal frontend dashboard
+* Add user authentication and role-based access
+* Improve AI folder classification
+* Add cloud deployment support
+* Add bulk actions for review and export workflows
+* Add deployment-ready observability and monitoring
+
+---
+
+## License
+
+This project is currently intended for learning, experimentation, and portfolio demonstration.
