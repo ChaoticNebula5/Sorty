@@ -1,6 +1,7 @@
 import uuid
 from types import SimpleNamespace
 
+import pytest
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import sessionmaker
 
@@ -43,6 +44,77 @@ def test_mock_embedding_provider_defaults_to_media_embedding_dimension() -> None
     provider = search_service.MockEmbeddingProvider()
 
     assert provider.dimension == search_service.MEDIA_EMBEDDING_DIMENSION
+
+
+def test_sentence_transformers_embedding_provider_uses_fake_model(monkeypatch) -> None:
+    class FakeModel:
+        def encode(self, texts, normalize_embeddings=True):
+            assert texts == ["stage performance"]
+            assert normalize_embeddings is True
+            return [[0.1, 0.2, 0.3]]
+
+    monkeypatch.setattr(
+        search_service,
+        "_load_sentence_transformers_model",
+        lambda model_name: FakeModel(),
+    )
+
+    provider = search_service.SentenceTransformersEmbeddingProvider(
+        model_name="fake-model",
+        dimension=3,
+    )
+
+    assert provider.provider_name == "sentence-transformers"
+    assert provider.model_name == "fake-model"
+    assert provider.embed_text("stage performance") == [0.1, 0.2, 0.3]
+
+
+def test_sentence_transformers_embedding_provider_rejects_dimension_mismatch(
+    monkeypatch,
+) -> None:
+    class FakeModel:
+        def encode(self, texts, normalize_embeddings=True):
+            return [[0.1, 0.2]]
+
+    monkeypatch.setattr(
+        search_service,
+        "_load_sentence_transformers_model",
+        lambda model_name: FakeModel(),
+    )
+
+    provider = search_service.SentenceTransformersEmbeddingProvider(
+        model_name="fake-model",
+        dimension=3,
+    )
+
+    with pytest.raises(ValueError, match="Embedding dimension mismatch"):
+        provider.embed_text("stage performance")
+
+
+def test_get_embedding_provider_selects_sentence_transformers(monkeypatch) -> None:
+    class FakeModel:
+        def encode(self, texts, normalize_embeddings=True):
+            return [[0.0, 1.0, 0.0]]
+
+    monkeypatch.setattr(
+        search_service,
+        "get_settings",
+        lambda: SimpleNamespace(
+            embedding_provider="sentence-transformers",
+            embedding_model="fake-model",
+            embedding_dimension=3,
+        ),
+    )
+    monkeypatch.setattr(
+        search_service,
+        "_load_sentence_transformers_model",
+        lambda model_name: FakeModel(),
+    )
+
+    provider = search_service.get_embedding_provider()
+
+    assert isinstance(provider, search_service.SentenceTransformersEmbeddingProvider)
+    assert provider.embed_text("query") == [0.0, 1.0, 0.0]
 
 
 def test_build_indexed_text_prefers_review_metadata() -> None:

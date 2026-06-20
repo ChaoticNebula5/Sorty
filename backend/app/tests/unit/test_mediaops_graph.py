@@ -25,6 +25,13 @@ def test_run_mediaops_batch_finishes_when_no_review_needed() -> None:
 
     assert result["phase"] == "finalized"
     assert result["reviewed"] is False
+    assert result["pending_review_count"] == 0
+    assert result["completed_phases"] == [
+        "batch_started",
+        "media_processed",
+        "export_ready",
+        "finalized",
+    ]
 
 
 def test_graph_result_from_final_state_returns_finalized_result() -> None:
@@ -37,6 +44,7 @@ def test_graph_result_from_final_state_returns_finalized_result() -> None:
             "job_id": job_id,
             "event_id": event_id,
             "needs_review_count": 0,
+            "pending_review_count": 0,
             "reviewed": False,
             "phase": "finalized",
         },
@@ -75,6 +83,7 @@ def test_mediaops_graph_interrupts_and_resumes_review_checkpoint() -> None:
         "type": "review_required",
         "job_id": job_id,
         "event_id": event_id,
+        "phase": "review_required",
         "pending_review_count": 2,
     }
     graph_result = mediaops_graph.graph_result_from_invoke(
@@ -88,6 +97,14 @@ def test_mediaops_graph_interrupts_and_resumes_review_checkpoint() -> None:
 
     assert resumed["phase"] == "finalized"
     assert resumed["reviewed"] is True
+    assert resumed["pending_review_count"] == 0
+    assert resumed["completed_phases"] == [
+        "batch_started",
+        "media_processed",
+        "review_completed",
+        "export_ready",
+        "finalized",
+    ]
     resumed_result = mediaops_graph.graph_result_from_invoke(
         thread_id=thread_id,
         result=resumed,
@@ -97,7 +114,7 @@ def test_mediaops_graph_interrupts_and_resumes_review_checkpoint() -> None:
         thread_id=thread_id,
         job_id=job_id,
         event_id=event_id,
-        pending_review_count=2,
+        pending_review_count=0,
     )
 
 

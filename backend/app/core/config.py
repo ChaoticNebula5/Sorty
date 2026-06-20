@@ -40,10 +40,10 @@ class Settings(BaseSettings):
     gemini_vision_model: str = "gemini-2.0-flash"
     openai_api_key: str = ""
     openai_vision_model: str = "gpt-4o-mini"
-    ollama_base_url: str = "http://ollama:11434"
+    ollama_base_url: str = "http://host.docker.internal:11434"
     ollama_vision_model: str = "llava"
 
-    embedding_provider: Literal["mock", "sentence-transformers"] = "mock"
+    embedding_provider: Literal["mock", "sentence-transformers"] = "sentence-transformers"
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_dimension: int = 384
 
