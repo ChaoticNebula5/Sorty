@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom'
 import { AppShell } from '@/components/layout/AppShell'
+import { LandingPage } from '@/pages/LandingPage'
 import { EventsLibrary } from '@/pages/EventsLibrary'
 import { CreateEvent } from '@/pages/CreateEvent'
 import { EventDetail } from '@/pages/EventDetail'
@@ -52,6 +53,7 @@ function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/landing" element={<LandingPage />} />
         <Route element={<AppShell />}>
           <Route path="/" element={<EventsLibrary />} />
           <Route path="/events/new" element={<CreateEvent />} />

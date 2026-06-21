@@ -37,8 +37,8 @@ export function EventDetail() {
   const uploadMutation = useMutation({
     mutationFn: (files: File[]) => uploadMediaBatch(eventId!, files, (p) => setUploadProgress(p)),
     onSuccess: (data) => {
-      if (data.data?.job_id) {
-        setActiveJobId(data.data.job_id)
+      if (data.data?.id) {
+        setActiveJobId(data.data.id)
       }
       setUploadProgress(0) // reset after upload
     },
