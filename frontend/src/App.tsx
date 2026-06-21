@@ -49,12 +49,14 @@ function EventRequiredState({ title, description }: { title: string, description
   )
 }
 
+import { AdminGuard } from '@/components/auth/AdminGuard'
+
 function App() {
   return (
     <BrowserRouter>
       <Routes>
         <Route path="/landing" element={<LandingPage />} />
-        <Route element={<AppShell />}>
+        <Route element={<AdminGuard><AppShell /></AdminGuard>}>
           <Route path="/" element={<EventsLibrary />} />
           <Route path="/events/new" element={<CreateEvent />} />
           <Route path="/events/:eventId" element={<EventDetail />} />

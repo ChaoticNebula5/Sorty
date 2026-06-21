@@ -8,8 +8,10 @@ import {
   Aperture,
   Library,
   Command,
+  Lock,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { clearAdminToken, dispatchAuthLocked } from '@/lib/auth'
 import { useEffect, useState } from 'react'
 import { AnimatePresence, motion } from 'framer-motion'
 
@@ -95,6 +97,18 @@ function CommandBar() {
           aria-label="Notifications"
         >
           <Bell className="size-4" />
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            clearAdminToken()
+            dispatchAuthLocked()
+          }}
+          className="relative flex size-9 items-center justify-center rounded-sm border border-border bg-surface text-muted-foreground transition-colors hover:text-destructive hover:border-destructive/50"
+          title="Lock Admin"
+          aria-label="Lock Admin"
+        >
+          <Lock className="size-4" />
         </button>
       </div>
     </header>

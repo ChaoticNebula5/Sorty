@@ -1,13 +1,31 @@
 import axios from 'axios'
+import { getAdminToken, clearAdminToken, dispatchAuthLocked } from '@/lib/auth'
 
 export const apiClient = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
   headers: {
     'Content-Type': 'application/json',
-    // In a real app we'd get this from a store or context
-    'X-API-Key': 'demo-secret',
   },
 })
+
+apiClient.interceptors.request.use((config) => {
+  const token = getAdminToken()
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`
+  }
+  return config
+})
+
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (axios.isAxiosError(error) && error.response?.status === 401) {
+      clearAdminToken()
+      dispatchAuthLocked()
+    }
+    return Promise.reject(error)
+  }
+)
 
 export interface ApiErrorDetail {
   status: number
@@ -20,6 +38,15 @@ export function parseApiError(error: unknown): ApiErrorDetail {
   if (axios.isAxiosError(error) && error.response) {
     const status = error.response.status
     const data = error.response.data as any
+
+    if (data && data.error && typeof data.error === 'object' && data.error.code) {
+      return {
+        status,
+        code: data.error.code,
+        message: data.error.message || 'An error occurred',
+        details: data.error.details,
+      }
+    }
 
     if (data && data.detail) {
       // Handle Sorty custom HTTPExceptions: detail = { code, message, details }
