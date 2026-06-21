@@ -53,6 +53,16 @@ class Event(TimestampMixin, Base):
     event_type: Mapped[str | None] = mapped_column(String(80), nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     event_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    is_public: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    public_slug: Mapped[str | None] = mapped_column(
+        String(180),
+        nullable=True,
+        unique=True,
+    )
+    published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     archived_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,

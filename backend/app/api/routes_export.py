@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, require_api_key
+from app.api.deps import get_db, require_admin_auth
 from app.schemas.common import APIResponse
 from app.schemas.export import ExportCreateRequest, ExportJobRead
 from app.services import event_service, export_service, queue_service, storage_factory
@@ -13,7 +13,7 @@ from app.services import event_service, export_service, queue_service, storage_f
 router = APIRouter(
     prefix="/api",
     tags=["export"],
-    dependencies=[Depends(require_api_key)],
+    dependencies=[Depends(require_admin_auth)],
 )
 
 

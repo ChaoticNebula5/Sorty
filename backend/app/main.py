@@ -7,6 +7,7 @@ from app.api.routes_export import router as export_router
 from app.api.routes_health import router as health_router
 from app.api.routes_jobs import router as jobs_router
 from app.api.routes_media import router as media_router
+from app.api.routes_public import router as public_router
 from app.api.routes_review import router as review_router
 from app.api.routes_search import router as search_router
 from app.core.config import get_settings
@@ -31,6 +32,7 @@ def create_app() -> FastAPI:
     app.include_router(review_router)
     app.include_router(search_router)
     app.include_router(export_router)
+    app.include_router(public_router)
 
     return app
 

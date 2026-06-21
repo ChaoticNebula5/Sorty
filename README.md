@@ -4,7 +4,7 @@ Sorty AI is an AI-powered event media management backend that helps event teams 
 
 It follows the locked PRD/TRD direction:
 
-- FastAPI backend with API-key auth
+- FastAPI backend with owner-token auth
 - SQLAlchemy 2.0, Alembic, PostgreSQL, and pgvector
 - Redis + RQ background processing
 - MinIO object storage for originals, thumbnails, and export ZIPs
@@ -15,6 +15,16 @@ It follows the locked PRD/TRD direction:
 - Organized ZIP export with metadata
 
 No JWT/OAuth is used. No ChromaDB, Pinecone, or Weaviate is used.
+
+## Access Model
+
+Sorty currently uses a simple owner-token model for hosted deployments:
+
+- Private dashboard and mutation APIs require `Authorization: Bearer <ADMIN_TOKEN>`.
+- `ADMIN_TOKEN` is backend-only. Never place it in `VITE_*` frontend environment variables or any built frontend bundle.
+- `X-API-Key` is deprecated and accepted only when `APP_ENV=local` and `ENABLE_LEGACY_API_KEY=true`.
+- Public read-only APIs live under `/api/public/...` and expose only published event fields and export-ready thumbnail metadata.
+- Frontend owner-token entry/storage will be implemented later; production frontend secrets should be entered at runtime, not baked into env files.
 
 ## Current Status
 
@@ -32,6 +42,8 @@ From the repository root:
 ```powershell
 Copy-Item .env.example .env
 ```
+
+Before hosting, set `ADMIN_TOKEN` in the backend environment to a strong random value and keep `ENABLE_LEGACY_API_KEY=false` or unset.
 
 ### 3. Start the Docker Stack
 
@@ -75,6 +87,8 @@ Start Docker services first, then run:
 python -m pytest backend/app/tests/integration -m integration
 ```
 
+Set `SORTY_INTEGRATION_ADMIN_TOKEN` to the backend `ADMIN_TOKEN` for integration tests. `SORTY_INTEGRATION_API_KEY` is only for explicit local legacy-auth runs.
+
 For Windows users, if pytest faces temp/cache permission issues, run tests with a local temp directory:
 
 ```powershell
@@ -91,7 +105,7 @@ Use the project virtual environment:
 .\.venv\Scripts\python.exe -m pytest backend/app/tests/unit
 ```
 
-At the time of writing, the unit suite has 191 passing tests.
+At the time of writing, the unit suite has 234 passing tests.
 
 ## Main Backend Flow
 

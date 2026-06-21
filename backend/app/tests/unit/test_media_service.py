@@ -118,6 +118,94 @@ def test_get_event_media_summary_counts_media_quality_and_review_rows() -> None:
     assert summary.export_ready_review_decisions == 2
 
 
+def test_public_event_media_filters_export_ready_processed_thumbnails() -> None:
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    Event.metadata.create_all(
+        engine,
+        tables=[
+            Event.__table__,
+            MediaAsset.__table__,
+            QualitySignal.__table__,
+        ],
+    )
+    Session = sessionmaker(bind=engine)
+
+    with Session() as db:
+        db.execute(
+            text(
+                "create table review_decisions ("
+                "id char(32) primary key, "
+                "media_id char(32) not null, "
+                "status varchar(40) not null, "
+                "include_in_export boolean not null"
+                ")"
+            )
+        )
+        db.execute(
+            text(
+                "create table ai_analyses ("
+                "id char(32) primary key, "
+                "media_id char(32) not null"
+                ")"
+            )
+        )
+        event = Event(name="Campus Fest", slug="campus-fest")
+        other_event = Event(name="Other Fest", slug="other-fest")
+        db.add_all([event, other_event])
+        db.flush()
+
+        approved = _make_media(event.id, "approved.jpg", "processed")
+        edited = _make_media(event.id, "edited.jpg", "processed")
+        pending = _make_media(event.id, "pending.jpg", "processed")
+        not_exported = _make_media(event.id, "not-exported.jpg", "processed")
+        not_processed = _make_media(event.id, "queued.jpg", "queued")
+        missing_thumbnail = _make_media(event.id, "missing-thumbnail.jpg", "processed")
+        missing_thumbnail.thumbnail_object_key = None
+        other = _make_media(other_event.id, "other.jpg", "processed")
+        db.add_all(
+            [
+                approved,
+                edited,
+                pending,
+                not_exported,
+                not_processed,
+                missing_thumbnail,
+                other,
+            ]
+        )
+        db.flush()
+
+        for media, status, include_in_export in (
+            (approved, "approved", True),
+            (edited, "edited", True),
+            (pending, "pending", True),
+            (not_exported, "approved", False),
+            (not_processed, "approved", True),
+            (missing_thumbnail, "approved", True),
+            (other, "approved", True),
+        ):
+            db.execute(
+                text(
+                    "insert into review_decisions "
+                    "(id, media_id, status, include_in_export) "
+                    "values (:id, :media_id, :status, :include_in_export)"
+                ),
+                {
+                    "id": uuid.uuid4().hex,
+                    "media_id": media.id.hex,
+                    "status": status,
+                    "include_in_export": include_in_export,
+                },
+            )
+        db.commit()
+
+        media_items = media_service.list_public_event_media(db, event.id)
+        total = media_service.count_public_event_media(db, event.id)
+
+    assert total == 2
+    assert {media.id for media in media_items} == {approved.id, edited.id}
+
+
 def _make_media(
     event_id: uuid.UUID,
     filename: str,

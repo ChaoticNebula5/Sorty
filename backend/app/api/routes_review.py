@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, require_api_key
+from app.api.deps import get_db, require_admin_auth
 from app.schemas.common import APIListResponse, APIResponse, Pagination
 from app.schemas.review import (
     BulkApproveReviewRequest,
@@ -17,7 +17,7 @@ from app.services import event_service, media_service, review_service
 router = APIRouter(
     prefix="/api",
     tags=["review"],
-    dependencies=[Depends(require_api_key)],
+    dependencies=[Depends(require_admin_auth)],
 )
 
 

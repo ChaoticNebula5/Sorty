@@ -54,21 +54,28 @@ def make_job(**overrides: object) -> SimpleNamespace:
 
 
 def auth_headers() -> dict[str, str]:
-    return {"X-API-Key": get_settings().app_api_key}
+    return {"Authorization": f"Bearer {get_settings().admin_token}"}
+
+
+def admin_headers() -> dict[str, str]:
+    return auth_headers()
 
 
 def test_list_events_requires_api_key() -> None:
     response = TestClient(app).get("/api/events")
 
     assert response.status_code == 401
-    assert response.json()["error"]["code"] == "missing_api_key"
+    assert response.json()["error"]["code"] == "missing_admin_token"
 
 
 def test_list_events_rejects_invalid_api_key() -> None:
-    response = TestClient(app).get("/api/events", headers={"X-API-Key": "wrong"})
+    response = TestClient(app).get(
+        "/api/events",
+        headers={"Authorization": "Bearer wrong"},
+    )
 
     assert response.status_code == 401
-    assert response.json()["error"]["code"] == "invalid_api_key"
+    assert response.json()["error"]["code"] == "invalid_admin_token"
 
 
 def test_create_event_returns_created_event(monkeypatch) -> None:
@@ -99,6 +106,25 @@ def test_create_event_returns_created_event(monkeypatch) -> None:
     assert body["data"]["id"] == str(event.id)
     assert body["data"]["name"] == "Cultural Fest 2026"
     assert body["data"]["slug"] == "cultural-fest-2026"
+
+
+def test_create_event_accepts_admin_bearer_token(monkeypatch) -> None:
+    event = make_event()
+
+    monkeypatch.setattr(event_service, "create_event", lambda db, payload: event)
+    app.dependency_overrides[get_db] = override_db
+
+    try:
+        response = TestClient(app).post(
+            "/api/events",
+            headers=admin_headers(),
+            json={"name": "Cultural Fest 2026"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 201
+    assert response.json()["data"]["id"] == str(event.id)
 
 
 def test_create_event_returns_wrapped_validation_error() -> None:
@@ -194,11 +220,105 @@ def test_get_event_returns_event(monkeypatch) -> None:
     assert body["data"]["slug"] == "cultural-fest-2026"
 
 
+def test_admin_can_publish_event(monkeypatch) -> None:
+    event_id = uuid.uuid4()
+    published_at = datetime.now(UTC)
+    event = make_event(
+        id=event_id,
+        is_public=True,
+        public_slug="public-fest",
+        published_at=published_at,
+    )
+    captured_payload = {}
+
+    def fake_update_event_public_settings(db, event, payload):
+        captured_payload["is_public"] = payload.is_public
+        captured_payload["public_slug"] = payload.public_slug
+        return event
+
+    monkeypatch.setattr(event_service, "get_event", lambda db, event_id: event)
+    monkeypatch.setattr(
+        event_service,
+        "update_event_public_settings",
+        fake_update_event_public_settings,
+    )
+    app.dependency_overrides[get_db] = override_db
+
+    try:
+        response = TestClient(app).patch(
+            f"/api/events/{event_id}/public",
+            headers=admin_headers(),
+            json={"is_public": True, "public_slug": "public-fest"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["is_public"] is True
+    assert body["data"]["public_slug"] == "public-fest"
+    assert body["data"]["published_at"] is not None
+    assert captured_payload == {"is_public": True, "public_slug": "public-fest"}
+
+
+def test_publish_rejects_duplicate_custom_slug(monkeypatch) -> None:
+    event = make_event()
+
+    def fake_update_event_public_settings(db, event, payload):
+        raise ValueError("public_slug is already in use.")
+
+    monkeypatch.setattr(event_service, "get_event", lambda db, event_id: event)
+    monkeypatch.setattr(
+        event_service,
+        "update_event_public_settings",
+        fake_update_event_public_settings,
+    )
+    app.dependency_overrides[get_db] = override_db
+
+    try:
+        response = TestClient(app).patch(
+            f"/api/events/{event.id}/public",
+            headers=admin_headers(),
+            json={"is_public": True, "public_slug": "taken-slug"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "public_slug_conflict"
+
+
+def test_admin_can_unpublish_event(monkeypatch) -> None:
+    event = make_event(is_public=False, public_slug="public-fest", published_at=None)
+
+    monkeypatch.setattr(event_service, "get_event", lambda db, event_id: event)
+    monkeypatch.setattr(
+        event_service,
+        "update_event_public_settings",
+        lambda db, event, payload: event,
+    )
+    app.dependency_overrides[get_db] = override_db
+
+    try:
+        response = TestClient(app).patch(
+            f"/api/events/{event.id}/public",
+            headers=admin_headers(),
+            json={"is_public": False},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["data"]["is_public"] is False
+    assert body["data"]["published_at"] is None
+
+
 def test_list_event_jobs_requires_api_key() -> None:
     response = TestClient(app).get(f"/api/events/{uuid.uuid4()}/jobs")
 
     assert response.status_code == 401
-    assert response.json()["error"]["code"] == "missing_api_key"
+    assert response.json()["error"]["code"] == "missing_admin_token"
 
 
 def test_get_event_media_summary_returns_counts(monkeypatch) -> None:

@@ -16,7 +16,7 @@ def override_db() -> Generator[object, None, None]:
 
 
 def auth_headers() -> dict[str, str]:
-    return {"X-API-Key": get_settings().app_api_key}
+    return {"Authorization": f"Bearer {get_settings().admin_token}"}
 
 
 def make_media(**overrides: object) -> SimpleNamespace:
@@ -68,7 +68,7 @@ def test_review_queue_requires_api_key() -> None:
     response = TestClient(app).get(f"/api/events/{uuid.uuid4()}/review-queue")
 
     assert response.status_code == 401
-    assert response.json()["error"]["code"] == "missing_api_key"
+    assert response.json()["error"]["code"] == "missing_admin_token"
 
 
 def test_review_queue_returns_items(monkeypatch) -> None:
@@ -138,7 +138,7 @@ def test_update_media_review_requires_api_key() -> None:
     )
 
     assert response.status_code == 401
-    assert response.json()["error"]["code"] == "missing_api_key"
+    assert response.json()["error"]["code"] == "missing_admin_token"
 
 
 def test_update_media_review_rejects_contradictory_export_decision() -> None:
@@ -267,7 +267,7 @@ def test_bulk_approve_reviews_requires_api_key() -> None:
     )
 
     assert response.status_code == 401
-    assert response.json()["error"]["code"] == "missing_api_key"
+    assert response.json()["error"]["code"] == "missing_admin_token"
 
 
 def test_bulk_approve_reviews_rejects_duplicate_media_ids() -> None:
