@@ -37,16 +37,16 @@ export interface EventItem {
 }
 
 export interface PublicEvent {
-  id: string
   name: string
   event_type: string
   description?: string
   event_date?: string | null
+  public_slug: string
   published_at: string
 }
 
 export interface PublicMediaItem {
-  id: string
+  media_id: string
   thumbnail_url: string
   file_url?: string
   quality_label: string | null

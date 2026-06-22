@@ -75,7 +75,7 @@ export function PublicEventGallery() {
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
             {mediaItems.map((item) => (
-              <div key={item.id} className="group relative aspect-square overflow-hidden rounded-md bg-surface border border-border">
+              <div key={item.media_id} className="group relative aspect-square overflow-hidden rounded-md bg-surface border border-border">
                 <img
                   src={item.thumbnail_url}
                   alt={item.tags.join(', ') || 'Event media'}
