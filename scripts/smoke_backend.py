@@ -1,5 +1,6 @@
 import argparse
 import json
+import os
 import time
 import uuid
 import zipfile
@@ -37,7 +38,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--api-key",
         default="demo-secret",
-        help="API key sent as X-API-Key.",
+        help="Deprecated local API key sent as X-API-Key when no admin token is provided.",
+    )
+    parser.add_argument(
+        "--admin-token",
+        default=os.getenv("ADMIN_TOKEN"),
+        help="Admin token sent as Authorization: Bearer <token>.",
     )
     parser.add_argument(
         "--image-count",
@@ -69,6 +75,23 @@ def request_json(
     print(f"{method.upper()} {url} -> {response.status_code}")
     response.raise_for_status()
     return response.json()
+
+
+def expect_status(
+    client: httpx.Client,
+    method: str,
+    url: str,
+    expected_status: int,
+    **kwargs: Any,
+) -> httpx.Response:
+    response = client.request(method, url, **kwargs)
+    print(f"{method.upper()} {url} -> {response.status_code}")
+    if response.status_code != expected_status:
+        raise RuntimeError(
+            f"Expected {expected_status} for {method.upper()} {url}, "
+            f"got {response.status_code}: {response.text}",
+        )
+    return response
 
 
 def require_ready(client: httpx.Client, mode: str) -> None:
@@ -291,18 +314,93 @@ def create_and_download_export(
     return export, zip_path, names
 
 
+def publish_public_event(client: httpx.Client, event_id: str, mode: str) -> str:
+    public_slug = f"smoke-{mode}-{uuid.uuid4().hex[:8]}"
+    body = request_json(
+        client,
+        "PATCH",
+        f"/api/events/{event_id}/public",
+        json={"is_public": True, "public_slug": public_slug},
+    )
+    event = body["data"]
+    if not event["is_public"] or event["public_slug"] != public_slug:
+        raise RuntimeError(f"Event was not published as expected: {event}")
+    return public_slug
+
+
+def verify_public_event(client: httpx.Client, public_slug: str) -> None:
+    public_client = httpx.Client(
+        base_url=str(client.base_url).rstrip("/"),
+        timeout=30.0,
+    )
+    try:
+        event = request_json(public_client, "GET", f"/api/public/events/{public_slug}")
+        if event["data"]["public_slug"] != public_slug:
+            raise RuntimeError(f"Unexpected public event response: {event}")
+
+        media = request_json(
+            public_client,
+            "GET",
+            f"/api/public/events/{public_slug}/media",
+        )
+        if int(media["pagination"]["total"]) < 1 or not media["data"]:
+            raise RuntimeError(f"Public media response is empty: {media}")
+
+        thumbnail_url = media["data"][0]["thumbnail_url"]
+        response = public_client.get(thumbnail_url, timeout=60.0)
+        print(f"GET {thumbnail_url} -> {response.status_code}")
+        response.raise_for_status()
+        content_type = response.headers.get("content-type", "")
+        if not content_type.startswith("image/"):
+            raise RuntimeError(f"Unexpected thumbnail content type: {content_type}")
+    finally:
+        public_client.close()
+
+
+def verify_private_auth(base_url: str, admin_token: str | None) -> None:
+    unauthenticated = httpx.Client(base_url=base_url.rstrip("/"), timeout=30.0)
+    try:
+        expect_status(unauthenticated, "GET", "/api/events", 401)
+        expect_status(
+            unauthenticated,
+            "GET",
+            "/api/events",
+            401,
+            headers={"Authorization": "Bearer wrong-token"},
+        )
+    finally:
+        unauthenticated.close()
+
+    if admin_token:
+        authorized = httpx.Client(
+            base_url=base_url.rstrip("/"),
+            headers={"Authorization": f"Bearer {admin_token}"},
+            timeout=30.0,
+        )
+        try:
+            request_json(authorized, "GET", "/api/events")
+        finally:
+            authorized.close()
+
+
 def main() -> None:
     args = parse_args()
     image_count = args.image_count or (3 if args.mode == "mock" else 1)
     artifact_dir = Path(args.artifact_dir or f".tmp/smoke-{args.mode}")
+    headers = (
+        {"Authorization": f"Bearer {args.admin_token}"}
+        if args.admin_token
+        else {"X-API-Key": args.api_key}
+    )
     client = httpx.Client(
         base_url=args.base_url.rstrip("/"),
-        headers={"X-API-Key": args.api_key},
+        headers=headers,
         timeout=30.0,
     )
 
     print(f"SMOKE_MODE={args.mode}")
     require_ready(client, args.mode)
+    verify_private_auth(args.base_url, args.admin_token)
 
     image_paths = generate_images(artifact_dir, args.mode, image_count)
     print(f"TEST_IMAGE_COUNT={len(image_paths)}")
@@ -359,6 +457,10 @@ def main() -> None:
     print(f"ZIP_ENTRY_COUNT={len(zip_entries)}")
     print("ZIP_ENTRIES=" + json.dumps(zip_entries))
 
+    public_slug = publish_public_event(client, event_id, args.mode)
+    print(f"PUBLIC_SLUG={public_slug}")
+    verify_public_event(client, public_slug)
+
     print(
         "SMOKE_SUMMARY="
         + json.dumps(
@@ -374,6 +476,7 @@ def main() -> None:
                 "export_id": export["id"],
                 "export_status": export["status"],
                 "export_included_count": export["included_count"],
+                "public_slug": public_slug,
                 "zip_path": str(zip_path),
                 "zip_entry_count": len(zip_entries),
                 "organized_file_count": organized_file_count,
