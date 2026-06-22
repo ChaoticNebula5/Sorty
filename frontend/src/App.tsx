@@ -6,6 +6,7 @@ import { CreateEvent } from '@/pages/CreateEvent'
 import { EventDetail } from '@/pages/EventDetail'
 import { ReviewQueue } from '@/pages/ReviewQueue'
 import { EventSearch } from '@/pages/EventSearch'
+import { PublicEventGallery } from '@/pages/PublicEventGallery'
 
 import { useQuery } from '@tanstack/react-query'
 import { getEvents } from '@/api/events'
@@ -56,6 +57,7 @@ function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/landing" element={<LandingPage />} />
+        <Route path="/public/events/:publicSlug" element={<PublicEventGallery />} />
         <Route element={<AdminGuard><AppShell /></AdminGuard>}>
           <Route path="/" element={<EventsLibrary />} />
           <Route path="/events/new" element={<CreateEvent />} />

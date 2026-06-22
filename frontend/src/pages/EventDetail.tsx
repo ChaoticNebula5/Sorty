@@ -1,9 +1,10 @@
 import { useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { useQuery, useMutation } from '@tanstack/react-query'
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getEvent } from '@/api/events'
 import { uploadMediaBatch, getJobStatus } from '@/api/jobs'
-import { UploadCloud, Loader2, CheckCircle2, AlertCircle, Clock } from 'lucide-react'
+import { updateEventPublicSettings } from '@/api/events'
+import { UploadCloud, Loader2, CheckCircle2, AlertCircle, Clock, Globe, Link as LinkIcon, Copy } from 'lucide-react'
 import { StatusChip } from '@/components/ui/StatusChip'
 import { useDropzone } from 'react-dropzone'
 import type { BatchJob } from '@/api/types'
@@ -160,7 +161,7 @@ export function EventDetail() {
           )}
         </div>
 
-        {/* Right: Active Job Tracker */}
+        {/* Right: Active Job Tracker & Public Sharing */}
         <div className="flex flex-col gap-5">
           {job ? (
             <JobTracker job={job} />
@@ -171,6 +172,8 @@ export function EventDetail() {
               <p className="text-xs mt-1">Upload files to start processing.</p>
             </div>
           )}
+
+          <PublicSharingPanel event={event} />
         </div>
       </div>
     </div>
@@ -263,6 +266,142 @@ function JobTracker({ job }: { job: BatchJob }) {
               Start Review Queue
             </Link>
           </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function PublicSharingPanel({ event }: { event: any }) {
+  const [isEditing, setIsEditing] = useState(false)
+  const [slugInput, setSlugInput] = useState(event.public_slug || '')
+  
+  const queryClient = useQueryClient()
+
+  const publishMutation = useMutation({
+    mutationFn: (payload: { is_public: boolean; public_slug?: string | null }) => updateEventPublicSettings(event.id, payload),
+    onSuccess: () => {
+      setIsEditing(false)
+      queryClient.invalidateQueries({ queryKey: ['event', event.id] })
+    }
+  })
+
+  const handleTogglePublic = () => {
+    publishMutation.mutate({ is_public: !event.is_public, public_slug: event.public_slug })
+  }
+
+  const handleSaveSlug = () => {
+    publishMutation.mutate({ is_public: event.is_public, public_slug: slugInput })
+  }
+
+  const copyLink = () => {
+    const url = `${window.location.origin}/public/events/${event.public_slug}`
+    navigator.clipboard.writeText(url)
+    alert('Link copied to clipboard')
+  }
+
+  return (
+    <div className="overflow-hidden rounded-md border border-border bg-card">
+      <div className="border-b border-border px-4 py-3 flex justify-between items-center">
+        <div className="flex items-center gap-2">
+          <Globe className="size-4 text-muted-foreground" />
+          <h2 className="text-sm font-semibold text-foreground">Public Sharing</h2>
+        </div>
+        <StatusChip tone={event.is_public ? 'ok' : 'muted'}>
+          {event.is_public ? 'Published' : 'Private'}
+        </StatusChip>
+      </div>
+
+      <div className="p-4 flex flex-col gap-4">
+        {event.is_public ? (
+          <>
+            <p className="text-sm text-muted-foreground">
+              This event is currently visible to the public. Anyone with the link can view its gallery.
+            </p>
+            
+            <div className="flex flex-col gap-2">
+              <label className="text-xs font-medium text-foreground">Public URL</label>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 overflow-hidden text-ellipsis whitespace-nowrap rounded border border-border bg-surface px-3 py-2 text-sm text-muted-foreground">
+                  {window.location.origin}/public/events/{event.public_slug}
+                </div>
+                <button
+                  onClick={copyLink}
+                  className="flex size-9 items-center justify-center rounded border border-border bg-surface hover:bg-elevated transition-colors"
+                  title="Copy link"
+                >
+                  <Copy className="size-4" />
+                </button>
+                <Link
+                  to={`/public/events/${event.public_slug}`}
+                  target="_blank"
+                  className="flex size-9 items-center justify-center rounded border border-border bg-surface hover:bg-elevated transition-colors"
+                  title="Open link"
+                >
+                  <LinkIcon className="size-4" />
+                </Link>
+              </div>
+            </div>
+
+            {isEditing ? (
+              <div className="flex flex-col gap-2 mt-2 border-t border-border pt-4">
+                <label className="text-xs font-medium text-foreground">Edit Custom Slug</label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={slugInput}
+                    onChange={(e) => setSlugInput(e.target.value)}
+                    className="flex-1 rounded border border-border bg-surface px-3 py-1.5 text-sm outline-none focus:border-primary"
+                    placeholder="e.g. awesome-party-2026"
+                  />
+                  <button
+                    onClick={handleSaveSlug}
+                    disabled={publishMutation.isPending}
+                    className="rounded bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground hover:opacity-90"
+                  >
+                    {publishMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : 'Save'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setIsEditing(false)
+                      setSlugInput(event.public_slug || '')
+                    }}
+                    className="rounded border border-border bg-surface px-3 py-1.5 text-sm hover:bg-elevated"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                onClick={() => setIsEditing(true)}
+                className="self-start text-xs text-primary hover:underline"
+              >
+                Edit custom slug URL
+              </button>
+            )}
+
+            <button
+              onClick={handleTogglePublic}
+              disabled={publishMutation.isPending}
+              className="mt-2 w-full rounded border border-danger/30 bg-danger/10 py-2 text-sm font-medium text-danger hover:bg-danger/20 transition-colors"
+            >
+              {publishMutation.isPending ? <Loader2 className="size-4 animate-spin mx-auto" /> : 'Unpublish Gallery'}
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-muted-foreground">
+              This event is currently private. Publish it to generate a public gallery link that you can share with guests.
+            </p>
+            <button
+              onClick={handleTogglePublic}
+              disabled={publishMutation.isPending}
+              className="mt-2 w-full rounded bg-primary py-2 text-sm font-medium text-primary-foreground hover:opacity-90 transition-opacity"
+            >
+              {publishMutation.isPending ? <Loader2 className="size-4 animate-spin mx-auto" /> : 'Publish Gallery'}
+            </button>
+          </>
         )}
       </div>
     </div>

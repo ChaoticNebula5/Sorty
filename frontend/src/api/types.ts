@@ -28,8 +28,29 @@ export interface EventItem {
   event_type: string
   description?: string
   status?: string // Computed or basic status from backend
+  is_public?: boolean
+  public_slug?: string | null
+  published_at?: string | null
+  event_date?: string | null
   created_at: string
   updated_at: string
+}
+
+export interface PublicEvent {
+  id: string
+  name: string
+  event_type: string
+  description?: string
+  event_date?: string | null
+  published_at: string
+}
+
+export interface PublicMediaItem {
+  id: string
+  thumbnail_url: string
+  file_url?: string
+  quality_label: string | null
+  tags: string[]
 }
 
 export interface EventMediaSummary {
