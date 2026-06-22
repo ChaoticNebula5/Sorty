@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, require_api_key
+from app.api.deps import get_db, require_admin_auth
 from app.schemas.common import APIListResponse, Pagination
 from app.schemas.search import SearchResultItem
 from app.services import event_service, search_service
@@ -11,7 +11,7 @@ from app.services import event_service, search_service
 router = APIRouter(
     prefix="/api",
     tags=["search"],
-    dependencies=[Depends(require_api_key)],
+    dependencies=[Depends(require_admin_auth)],
 )
 
 

@@ -16,7 +16,7 @@ def override_db() -> Generator[object, None, None]:
 
 
 def auth_headers() -> dict[str, str]:
-    return {"X-API-Key": get_settings().app_api_key}
+    return {"Authorization": f"Bearer {get_settings().admin_token}"}
 
 
 def make_job(**overrides: object) -> SimpleNamespace:
@@ -47,7 +47,7 @@ def test_get_job_requires_api_key() -> None:
     response = TestClient(app).get(f"/api/jobs/{uuid.uuid4()}")
 
     assert response.status_code == 401
-    assert response.json()["error"]["code"] == "missing_api_key"
+    assert response.json()["error"]["code"] == "missing_admin_token"
 
 
 def test_get_job_returns_job(monkeypatch) -> None:
@@ -92,7 +92,7 @@ def test_resume_job_requires_api_key() -> None:
     response = TestClient(app).post(f"/api/jobs/{uuid.uuid4()}/resume")
 
     assert response.status_code == 401
-    assert response.json()["error"]["code"] == "missing_api_key"
+    assert response.json()["error"]["code"] == "missing_admin_token"
 
 
 def test_resume_job_returns_404(monkeypatch) -> None:

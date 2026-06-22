@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, require_api_key
+from app.api.deps import get_db, require_admin_auth
 from app.schemas.common import APIResponse
 from app.schemas.jobs import BatchJobRead, JobResumeResponse
 from app.services import job_service, queue_service, review_service
@@ -11,7 +11,7 @@ from app.services import job_service, queue_service, review_service
 router = APIRouter(
     prefix="/api/jobs",
     tags=["jobs"],
-    dependencies=[Depends(require_api_key)],
+    dependencies=[Depends(require_admin_auth)],
 )
 
 

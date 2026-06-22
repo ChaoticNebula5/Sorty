@@ -3,16 +3,16 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, require_api_key
+from app.api.deps import get_db, require_admin_auth
 from app.schemas.common import APIListResponse, APIResponse, Pagination
-from app.schemas.events import EventCreate, EventMediaSummary, EventRead
+from app.schemas.events import EventCreate, EventMediaSummary, EventPublicSettingsUpdate, EventRead
 from app.schemas.jobs import BatchJobRead
 from app.services import event_service, job_service, media_service
 
 router = APIRouter(
     prefix="/api/events",
     tags=["events"],
-    dependencies=[Depends(require_api_key)],
+    dependencies=[Depends(require_admin_auth)],
 )
 
 
@@ -65,6 +65,38 @@ def get_event(
         data=EventRead.model_validate(event),
         error=None,
     )
+
+
+@router.patch("/{event_id}/public")
+def update_event_public_settings(
+    event_id: uuid.UUID,
+    payload: EventPublicSettingsUpdate,
+    db: Session = Depends(get_db),
+) -> APIResponse:
+    event = event_service.get_event(db, event_id)
+    if event is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={
+                "code": "event_not_found",
+                "message": "Event not found.",
+                "details": {"event_id": str(event_id)},
+            },
+        )
+
+    try:
+        updated = event_service.update_event_public_settings(db, event, payload)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "public_slug_conflict",
+                "message": str(exc),
+                "details": {"event_id": str(event_id)},
+            },
+        ) from exc
+
+    return APIResponse(data=EventRead.model_validate(updated), error=None)
 
 
 @router.get("/{event_id}/media-summary")

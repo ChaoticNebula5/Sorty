@@ -15,7 +15,7 @@ def override_db() -> Generator[object, None, None]:
 
 
 def auth_headers() -> dict[str, str]:
-    return {"X-API-Key": get_settings().app_api_key}
+    return {"Authorization": f"Bearer {get_settings().admin_token}"}
 
 
 def make_media(**overrides: object) -> SimpleNamespace:
@@ -49,7 +49,7 @@ def test_search_requires_api_key() -> None:
     )
 
     assert response.status_code == 401
-    assert response.json()["error"]["code"] == "missing_api_key"
+    assert response.json()["error"]["code"] == "missing_admin_token"
 
 
 def test_search_rejects_short_query() -> None:

@@ -16,7 +16,7 @@ def override_db() -> Generator[object, None, None]:
 
 
 def auth_headers() -> dict[str, str]:
-    return {"X-API-Key": get_settings().app_api_key}
+    return {"Authorization": f"Bearer {get_settings().admin_token}"}
 
 
 def make_export_job(**overrides: object) -> SimpleNamespace:
@@ -44,7 +44,7 @@ def test_create_export_requires_api_key() -> None:
     response = TestClient(app).post(f"/api/events/{uuid.uuid4()}/export", json={})
 
     assert response.status_code == 401
-    assert response.json()["error"]["code"] == "missing_api_key"
+    assert response.json()["error"]["code"] == "missing_admin_token"
 
 
 def test_create_export_returns_404_for_missing_event(monkeypatch) -> None:

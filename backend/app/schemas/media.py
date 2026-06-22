@@ -53,3 +53,11 @@ class BatchUploadResponse(BaseModel):
     rejected_count: int
     media_ids: list[uuid.UUID]
     rejected_files: list[BatchUploadRejectedItem]
+
+
+class PublicMediaRead(BaseModel):
+    media_id: uuid.UUID
+    thumbnail_url: str
+    caption: str | None
+    tags: list[str]
+    quality_label: str | None

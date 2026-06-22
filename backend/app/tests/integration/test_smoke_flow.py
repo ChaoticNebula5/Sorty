@@ -21,8 +21,19 @@ def _require_base_url() -> str:
     return base_url.rstrip("/")
 
 
-def _integration_api_key() -> str:
-    return os.getenv("SORTY_INTEGRATION_API_KEY", "demo-secret").strip() or "demo-secret"
+def _integration_auth_headers() -> dict[str, str]:
+    admin_token = os.getenv("SORTY_INTEGRATION_ADMIN_TOKEN", "").strip()
+    if admin_token:
+        return {"Authorization": f"Bearer {admin_token}"}
+
+    api_key = os.getenv("SORTY_INTEGRATION_API_KEY", "").strip()
+    if api_key:
+        return {"X-API-Key": api_key}
+
+    pytest.skip(
+        "Set SORTY_INTEGRATION_ADMIN_TOKEN for bearer auth, or "
+        "SORTY_INTEGRATION_API_KEY for explicit local legacy auth."
+    )
 
 
 def _integration_timeout_seconds() -> int:
@@ -36,7 +47,7 @@ def _integration_timeout_seconds() -> int:
 @pytest.fixture(scope="session")
 def integration_client() -> httpx.Client:
     base_url = _require_base_url()
-    headers = {"X-API-Key": _integration_api_key()}
+    headers = _integration_auth_headers()
     timeout = httpx.Timeout(60.0)
     with httpx.Client(base_url=base_url, headers=headers, timeout=timeout) as client:
         yield client
