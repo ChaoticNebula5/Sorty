@@ -99,38 +99,38 @@ export function HeroChaos() {
 
           {/* Column 1 */}
           <div ref={el => { columnsRef.current[0] = el }} className="flex flex-col gap-4">
-            <img src="/events/dev-conference.png" className="w-full h-64 object-cover rounded-md shadow-2xl border border-border/20" alt="" />
-            <img src="/events/panel.png" className="w-full h-64 object-cover rounded-md shadow-2xl border border-border/20 mt-16" alt="" />
+            <img src="https://images.unsplash.com/photo-1540575467063-178a50c2df87?auto=format&fit=crop&q=80&w=800" className="w-full h-64 object-cover rounded-md shadow-2xl border border-border/20" alt="" />
+            <img src="https://images.unsplash.com/photo-1511578314322-379afb476865?auto=format&fit=crop&q=80&w=800" className="w-full h-64 object-cover rounded-md shadow-2xl border border-border/20" alt="" />
           </div>
 
           {/* Column 2 */}
-          <div ref={el => { columnsRef.current[1] = el }} className="flex flex-col gap-4 pt-12">
-            <img src="/events/gala.png" className="w-full h-64 object-cover rounded-md shadow-2xl border border-border/20" alt="" />
-            <img src="/events/tech-summit.png" className="w-full h-64 object-cover rounded-md shadow-2xl border border-border/20 mt-8" alt="" />
+          <div ref={el => { columnsRef.current[1] = el }} className="flex flex-col gap-4 translate-y-12">
+            <img src="https://images.unsplash.com/photo-1511795409834-ef04bbd61622?auto=format&fit=crop&q=80&w=800" className="w-full h-64 object-cover rounded-md shadow-2xl border border-border/20" alt="" />
+            <img src="https://images.unsplash.com/photo-1591115765373-5207764f72e7?auto=format&fit=crop&q=80&w=800" className="w-full h-64 object-cover rounded-md shadow-2xl border border-border/20" alt="" />
           </div>
 
           {/* Column 3 */}
           <div ref={el => { columnsRef.current[2] = el }} className="flex flex-col gap-4">
-            <img src="/events/hackathon.png" className="w-full h-64 object-cover rounded-md shadow-2xl border border-border/20" alt="" />
-            <img src="/events/speaker-portrait.png" className="w-full h-64 object-cover rounded-md shadow-2xl border border-border/20 -mt-4" alt="" />
+            <img src="https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&q=80&w=800" className="w-full h-64 object-cover rounded-md shadow-2xl border border-border/20" alt="" />
+            <img src="https://images.unsplash.com/photo-1558008258-3256797b43f3?auto=format&fit=crop&q=80&w=800" className="w-full h-64 object-cover rounded-md shadow-2xl border border-border/20" alt="" />
           </div>
 
           {/* Column 4 */}
-          <div ref={el => { columnsRef.current[3] = el }} className="flex flex-col gap-4 pt-8">
-            <img src="/events/networking.png" className="w-full h-64 object-cover rounded-md shadow-2xl border border-border/20 -mt-8" alt="" />
-            <img src="/events/product-launch.png" className="w-full h-64 object-cover rounded-md shadow-2xl border border-border/20 mt-4" alt="" />
+          <div ref={el => { columnsRef.current[3] = el }} className="flex flex-col gap-4 translate-y-12">
+            <img src="https://images.unsplash.com/photo-1515169067868-5387ec356754?auto=format&fit=crop&q=80&w=800" className="w-full h-64 object-cover rounded-md shadow-2xl border border-border/20" alt="" />
+            <img src="https://images.unsplash.com/photo-1505373877841-8d25f7d46678?auto=format&fit=crop&q=80&w=800" className="w-full h-64 object-cover rounded-md shadow-2xl border border-border/20" alt="" />
           </div>
 
         </div>
       </div>
 
       <div className="relative z-10 flex flex-col items-center text-center max-w-4xl px-6">
-        <div ref={el => { textRefs.current[0] = el }} className="mono-label text-primary mb-6">Sorty Media Pipeline</div>
+        <div ref={el => { textRefs.current[0] = el }} className="mono-label text-primary mb-6">Sorty: The Intelligent Event Media Pipeline</div>
         <h1 ref={el => { textRefs.current[1] = el }} className="text-5xl md:text-7xl font-semibold tracking-tight text-foreground mb-8">
-          Tame the Event Chaos.
+          Sorty Tames the Event Media Chaos.
         </h1>
         <p ref={el => { textRefs.current[2] = el }} className="text-lg md:text-xl text-muted-foreground max-w-2xl mb-10 leading-relaxed">
-          Sorty turns thousands of raw event photos into reviewed, searchable, delivery-ready packs without burying your team in manual sorting.
+          Sorty is the professional workstation that turns thousands of raw event photos into reviewed, searchable, delivery-ready packs. Let Sorty handle the sorting so you can focus on the shooting.
         </p>
 
         <div ref={el => { textRefs.current[3] = el }} className="flex flex-col sm:flex-row items-center gap-4 mb-6">
@@ -156,7 +156,7 @@ export function HeroChaos() {
         </div>
 
         <p ref={el => { textRefs.current[4] = el }} className="text-sm text-muted-foreground/60 font-medium">
-          Built for event teams handling 10k+ photos per event.
+          Sorty is engineered for high-volume event teams.
         </p>
       </div>
 

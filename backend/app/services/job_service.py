@@ -109,30 +109,6 @@ def mark_job_processing(db: Session, job: BatchJob) -> BatchJob:
     return job
 
 
-def mark_job_completed(db: Session, job: BatchJob) -> BatchJob:
-    job.status = "completed"
-    job.processed_files = job.total_files
-    job.completed_at = datetime.now(UTC)
-    db.commit()
-    db.refresh(job)
-    return job
-
-
-def mark_job_partial_failed(
-    db: Session,
-    job: BatchJob,
-    processed_files: int,
-    failed_files: int,
-    error_message: str,
-) -> BatchJob:
-    job.status = "partial_failed"
-    job.processed_files = processed_files
-    job.failed_files = failed_files
-    job.error_message = error_message
-    job.completed_at = datetime.now(UTC)
-    db.commit()
-    db.refresh(job)
-    return job
 
 
 def mark_job_finished(

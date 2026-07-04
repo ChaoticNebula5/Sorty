@@ -1,0 +1,7 @@
+services:
+  backend:
+    environment:
+      VISION_PROVIDER: mock
+  worker:
+    environment:
+      VISION_PROVIDER: mock

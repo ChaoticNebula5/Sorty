@@ -28,12 +28,7 @@ Sorty currently uses a simple owner-token model for hosted deployments:
 
 ## Current Status
 
-Backend MVP is smoke-verified via the Docker-backed manual smoke test.
-The next work before a basic UI is:
-
-- add a few integration tests around Postgres, MinIO, Redis/RQ, and export
-- optionally add Gemini behind the existing `VisionProvider`
-- build a minimal UI after backend flow is proven
+Backend MVP is smoke-verified via the Docker-backed manual smoke test. The frontend dashboard and landing page are implemented.
 
 ## Quick Start
 
@@ -45,13 +40,13 @@ Copy-Item .env.example .env
 
 Before hosting, set `ADMIN_TOKEN` in the backend environment to a strong random value and keep `ENABLE_LEGACY_API_KEY=false` or unset.
 
-### 3. Start the Docker Stack
+### 1. Start the Docker Stack
 
 ```bash
 docker compose up --build
 ```
 
-### 4. Run Database Migrations
+### 2. Run Database Migrations
 
 In another terminal:
 
@@ -63,7 +58,7 @@ The Compose stack starts the backend, worker, Postgres/pgvector, Redis, and MinI
 The first sentence-transformers use may download
 `sentence-transformers/all-MiniLM-L6-v2` into the container/cache.
 
-### 5. Open API Docs
+### 3. Open API Docs
 
 ```text
 http://localhost:8000/docs
@@ -88,24 +83,6 @@ python -m pytest backend/app/tests/integration -m integration
 ```
 
 Set `SORTY_INTEGRATION_ADMIN_TOKEN` to the backend `ADMIN_TOKEN` for integration tests. `SORTY_INTEGRATION_API_KEY` is only for explicit local legacy-auth runs.
-
-For Windows users, if pytest faces temp/cache permission issues, run tests with a local temp directory:
-
-```powershell
-curl.exe http://localhost:8000/api/ready
-```
-
-`/api/ready` checks database, Redis, and storage reachability without exposing connection strings or secrets.
-
-## Test Suite
-
-Use the project virtual environment:
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest backend/app/tests/unit
-```
-
-At the time of writing, the unit suite has 234 passing tests.
 
 ## Main Backend Flow
 

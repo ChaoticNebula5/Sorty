@@ -99,15 +99,6 @@ def attach_media_to_batch_job(
     db.commit()
 
 
-def mark_batch_media_processing(db: Session, batch_job_id: uuid.UUID) -> None:
-    media_assets = list(
-        db.scalars(select(MediaAsset).where(MediaAsset.batch_job_id == batch_job_id))
-    )
-    for media in media_assets:
-        media.processing_status = "processing"
-
-    db.commit()
-
 
 def mark_media_processing(db: Session, media: MediaAsset) -> MediaAsset:
     media.processing_status = "processing"
@@ -155,16 +146,6 @@ def mark_media_failed(
     db.refresh(media)
     return media
 
-
-def mark_batch_media_processed(db: Session, batch_job_id: uuid.UUID) -> None:
-    media_assets = list(
-        db.scalars(select(MediaAsset).where(MediaAsset.batch_job_id == batch_job_id))
-    )
-    for media in media_assets:
-        media.processing_status = "processed"
-        media.processing_error = None
-
-    db.commit()
 
 
 def mark_batch_media_failed(

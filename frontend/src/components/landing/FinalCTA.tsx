@@ -9,10 +9,10 @@ export function FinalCTA() {
       
       <div className="container relative z-10 mx-auto px-6 max-w-4xl text-center">
         <h2 className="text-4xl md:text-6xl font-semibold mb-8">
-          Ready to sort it out?
+          Ready to let Sorty sort it out?
         </h2>
         <p className="text-xl text-muted-foreground mb-12">
-          Experience the professional event media workstation.
+          Experience Sorty, the professional event media workstation built to accelerate your delivery.
         </p>
         <Link 
           to="/" 

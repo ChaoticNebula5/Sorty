@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, selectinload
 from app.core.config import get_settings
 from app.db.models import Event, ExportJob, MediaAsset, ReviewDecision
 from app.schemas.export import ExportCreateRequest
+from app.services import media_service, review_service
 from app.services.storage_service import StorageService
 
 
@@ -33,22 +34,6 @@ def get_export_job(db: Session, export_id: uuid.UUID) -> ExportJob | None:
     return db.scalar(select(ExportJob).where(ExportJob.id == export_id))
 
 
-def count_pending_reviews(db: Session, event_id: uuid.UUID) -> int:
-    return db.scalar(
-        select(func.count())
-        .select_from(ReviewDecision)
-        .join(ReviewDecision.media)
-        .where(
-            MediaAsset.event_id == event_id,
-            ReviewDecision.status == "pending",
-        )
-    ) or 0
-
-
-def count_event_media(db: Session, event_id: uuid.UUID) -> int:
-    return db.scalar(
-        select(func.count()).select_from(MediaAsset).where(MediaAsset.event_id == event_id)
-    ) or 0
 
 
 def list_export_candidates(
@@ -218,7 +203,7 @@ def create_export_job(
     event: Event,
     payload: ExportCreateRequest,
 ) -> ExportJob:
-    if not payload.include_pending and count_pending_reviews(db, event.id) > 0:
+    if not payload.include_pending and review_service.count_event_review_queue(db, event.id) > 0:
         raise ExportBlockedError("Export is blocked while review items are pending.")
 
     export_id = uuid.uuid4()
@@ -294,7 +279,7 @@ def generate_export_archive(
         export_job.included_count = len(media_items)
         export_job.excluded_count = max(
             0,
-            count_event_media(db, export_job.event_id) - len(media_items),
+            media_service.count_event_media(db, export_job.event_id) - len(media_items),
         )
         export_job.completed_at = datetime.now(UTC)
         export_job.error_message = None

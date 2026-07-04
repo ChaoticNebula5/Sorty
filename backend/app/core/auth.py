@@ -4,13 +4,13 @@ from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBea
 
 from app.core.config import get_settings
 
-api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+_api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 bearer_token = HTTPBearer(auto_error=False)
 
 
 def require_admin_auth(
     credentials: HTTPAuthorizationCredentials | None = Security(bearer_token),
-    api_key: str | None = Security(api_key_header),
+    api_key: str | None = Security(_api_key_header),
 ) -> None:
     settings = get_settings()
 
@@ -58,27 +58,3 @@ def require_admin_auth(
         },
     )
 
-
-def require_api_key(api_key: str | None = Security(api_key_header)) -> None:
-    settings = get_settings()
-
-    if not api_key:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={
-                "code": "missing_api_key",
-                "message": "Missing X-API-Key header.",
-            },
-        )
-    if not (
-        settings.app_env == "local"
-        and settings.enable_legacy_api_key
-        and compare_digest(api_key, settings.app_api_key)
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={
-                "code": "invalid_api_key",
-                "message": "Invalid API key.",
-            },
-        )

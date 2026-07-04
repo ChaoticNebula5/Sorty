@@ -2,15 +2,16 @@ import { useRef } from 'react'
 import gsap from 'gsap'
 import { ScrollTrigger } from 'gsap/ScrollTrigger'
 import { useGSAP } from '@gsap/react'
+import { UploadCloud, Cpu, Eye, Search, Archive } from 'lucide-react'
 
 gsap.registerPlugin(ScrollTrigger)
 
 const layersData = [
-  { id: 'Upload', desc: 'Ingest raw batch folders at high velocity.', chip: 'Processing', tone: 'info', image: '/events/dev-conference.png' },
-  { id: 'Analyze', desc: 'Semantic tagging, blur detection, face grouping.', chip: 'AI Active', tone: 'primary', image: '/events/networking.png' },
-  { id: 'Review', desc: 'Human-in-the-loop curation for uncertain shots.', chip: '14 Pending', tone: 'warn', image: '/events/speaker-portrait.png' },
-  { id: 'Search', desc: 'Find exact moments using natural language.', chip: 'Indexed', tone: 'ok', image: '/events/hackathon.png' },
-  { id: 'Export', desc: 'Compile curated packs into organized ZIPs.', chip: 'Ready', tone: 'foreground', image: '/events/product-launch.png' },
+  { id: 'Upload', desc: 'Ingest raw batch folders at high velocity.', chip: 'Processing', tone: 'info', icon: UploadCloud },
+  { id: 'Analyze', desc: 'Semantic tagging, blur detection, face grouping.', chip: 'AI Active', tone: 'primary', icon: Cpu },
+  { id: 'Review', desc: 'Human-in-the-loop curation for uncertain shots.', chip: '14 Pending', tone: 'warn', icon: Eye },
+  { id: 'Search', desc: 'Find exact moments using natural language.', chip: 'Indexed', tone: 'ok', icon: Search },
+  { id: 'Export', desc: 'Compile curated packs into organized ZIPs.', chip: 'Ready', tone: 'foreground', icon: Archive },
 ]
 
 const getToneClasses = (tone: string) => {
@@ -119,9 +120,9 @@ export function WorkflowLayersPreview() {
 
         <div ref={titleRef} className="mb-16 md:absolute md:top-24 md:left-1/2 md:-translate-x-1/2 md:text-center w-full z-0">
           <div className="mono-label text-primary mb-4">Decomposition</div>
-          <h2 className="text-3xl md:text-5xl font-semibold">Layers of Control</h2>
+          <h2 className="text-3xl md:text-5xl font-semibold">Sorty's Pipeline gives you Layers of Control</h2>
           <p className="mt-4 text-muted-foreground max-w-xl text-lg md:mx-auto">
-            A chaotic folder becomes a streamlined pipeline. We separate ingest, analysis, and curation into distinct, manageable workflows.
+            Sorty transforms a chaotic folder into a streamlined asset pipeline. Sorty separates ingestion, semantic analysis, and curation into distinct, manageable workflows that put you in control.
           </p>
         </div>
 
@@ -133,11 +134,11 @@ export function WorkflowLayersPreview() {
               className="md:absolute md:top-1/2 md:left-1/2 relative w-full max-w-2xl bg-card border border-border/50 rounded-md shadow-[0_15px_50px_rgba(0,0,0,0.5)] overflow-hidden flex flex-col sm:flex-row mb-6 md:mb-0 transition-colors duration-300 group"
               data-active="false"
             >
-              {/* Media Texture */}
-              <div className="h-32 sm:h-auto sm:w-1/3 relative border-b sm:border-b-0 sm:border-r border-border overflow-hidden bg-surface">
-                 <div className="absolute inset-0 bg-primary/10 mix-blend-overlay z-10 transition-opacity group-data-[active=true]:opacity-100 opacity-50" />
-                 <img src={layer.image} className="w-full h-full object-cover grayscale-[50%] opacity-60 mix-blend-overlay transition-all duration-500 group-data-[active=true]:grayscale-0 group-data-[active=true]:opacity-80" alt="" />
-                 <div className="absolute inset-0 bg-gradient-to-t sm:bg-gradient-to-r from-card to-transparent pointer-events-none" />
+              {/* Abstract Icon Graphic */}
+              <div className="h-32 sm:h-auto sm:w-1/3 relative border-b sm:border-b-0 sm:border-r border-border overflow-hidden bg-surface flex items-center justify-center">
+                 <div className="absolute inset-0 bg-primary/20 opacity-0 group-data-[active=true]:opacity-100 transition-opacity duration-700 blur-2xl rounded-full scale-150" />
+                 <layer.icon className="w-16 h-16 opacity-30 text-muted-foreground group-data-[active=true]:text-primary group-data-[active=true]:opacity-100 transition-all duration-500 z-10 drop-shadow-md group-data-[active=true]:scale-110" />
+                 <div className="absolute inset-0 bg-gradient-to-t sm:bg-gradient-to-r from-card to-transparent pointer-events-none z-20" />
               </div>
               
               {/* Content */}

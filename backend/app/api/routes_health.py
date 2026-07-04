@@ -1,14 +1,13 @@
 from fastapi import APIRouter, status
 from fastapi.responses import JSONResponse
 
-from app.core.constants import API_PREFIX, HEALTH_PATH
 from app.core.config import get_settings
 from app.services import readiness_service
 
-router = APIRouter(prefix=API_PREFIX, tags=["health"])
+router = APIRouter(prefix="/api", tags=["health"])
 
 
-@router.get(HEALTH_PATH)
+@router.get("/health")
 def health_check() -> dict:
     settings = get_settings()
     return {

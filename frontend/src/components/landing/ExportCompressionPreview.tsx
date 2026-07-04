@@ -87,12 +87,12 @@ export function ExportCompressionPreview() {
   }, { scope: containerRef })
 
   const mockImages = [
-    '/events/dev-conference.png',
-    '/events/gala.png',
-    '/events/hackathon.png',
-    '/events/networking.png',
-    '/events/panel.png',
-    '/events/speaker-portrait.png',
+    'https://images.unsplash.com/photo-1540575467063-178a50c2df87?auto=format&fit=crop&q=80&w=800',
+    'https://images.unsplash.com/photo-1511795409834-ef04bbd61622?auto=format&fit=crop&q=80&w=800',
+    'https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&q=80&w=800',
+    'https://images.unsplash.com/photo-1515169067868-5387ec356754?auto=format&fit=crop&q=80&w=800',
+    'https://images.unsplash.com/photo-1511578314322-379afb476865?auto=format&fit=crop&q=80&w=800',
+    'https://images.unsplash.com/photo-1558008258-3256797b43f3?auto=format&fit=crop&q=80&w=800',
   ]
 
   const folderLabels = [
@@ -107,9 +107,9 @@ export function ExportCompressionPreview() {
       <div className="container mx-auto px-6 max-w-5xl text-center relative z-10">
         
         <div ref={el => { textRefs.current[0] = el }} className="mono-label text-primary mb-4">Export & Delivery</div>
-        <h2 ref={el => { textRefs.current[1] = el }} className="text-3xl md:text-5xl font-semibold mb-6">Deliver the pack before the buzz fades.</h2>
+        <h2 ref={el => { textRefs.current[1] = el }} className="text-3xl md:text-5xl font-semibold mb-6">Sorty Accelerates Your Client Handoff.</h2>
         <p ref={el => { textRefs.current[2] = el }} className="text-muted-foreground text-lg leading-relaxed mb-16 max-w-2xl mx-auto">
-          Reviewed media, metadata, and summary notes are compiled into one organized ZIP — ready for handoff.
+          Sorty automatically compiles your reviewed media, detailed metadata, and summary notes into a pristine ZIP archive, perfectly organized and ready for immediate client delivery.
         </p>
 
         <div ref={centerAreaRef} className="relative h-[400px] w-full max-w-2xl mx-auto flex items-center justify-center mb-16">

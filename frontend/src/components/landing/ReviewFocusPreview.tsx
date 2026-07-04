@@ -50,8 +50,8 @@ export function ReviewFocusPreview() {
       // 3. Thumbnails slide in
       tl.to(thumbsRef.current, { x: 0, opacity: 1, duration: 0.6, ease: "power2.out" }, "-=0.6")
 
-      // 4. Image sharpens (Isolating the issue)
-      tl.to(imageRef.current, { filter: 'blur(0px) grayscale(0%)', opacity: 1, duration: 1, ease: "power2.inOut" }, "-=0.2")
+      // 4. Image highlights (Isolating the issue, keeping blur)
+      tl.to(imageRef.current, { filter: 'blur(8px) grayscale(0%)', opacity: 0.9, duration: 1, ease: "power2.inOut" }, "-=0.2")
       tl.to(focusLabelRef.current, { opacity: 0, scale: 0.9, duration: 0.5, ease: "power2.inOut" }, "<")
 
       // 5. Inspector details appear
@@ -92,9 +92,9 @@ export function ReviewFocusPreview() {
         <div className="grid md:grid-cols-2 gap-16 items-center">
           <div>
             <div className="mono-label text-primary mb-4">Human-in-the-Loop</div>
-            <h2 className="text-3xl md:text-5xl font-semibold mb-6">Focus on the Edge Cases</h2>
+            <h2 className="text-3xl md:text-5xl font-semibold mb-6">Sorty's Review Queue Flags the Edge Cases</h2>
             <p className="text-muted-foreground text-lg leading-relaxed mb-8">
-              AI handles the 90%. But some moments are blurry, ambiguous, or highly sensitive. The Review Queue isolates only the uncertain images, letting you make swift, confident decisions without sifting through thousands of perfect shots.
+              Sorty automates the bulk of your sorting while keeping you in complete creative control. Sorty's intelligent review queue isolates only the blurry, ambiguous, or sensitive shots, letting you make swift decisions without sifting through perfect photos.
             </p>
             <ul className="space-y-4">
               <li className="flex items-center gap-3 text-sm font-medium text-foreground">
@@ -123,20 +123,20 @@ export function ReviewFocusPreview() {
               {/* Mock Sidebar Thumbnails */}
               <div ref={thumbsRef} className="w-16 border-r border-border flex flex-col gap-2 p-2 bg-surface/50">
                 <div className="aspect-square rounded border-2 border-primary overflow-hidden">
-                  <img src="/events/speaker-portrait.png" className="w-full h-full object-cover" alt="" />
+                  <img src="https://images.unsplash.com/photo-1558008258-3256797b43f3?auto=format&fit=crop&q=80&w=800" className="w-full h-full object-cover" alt="" />
                 </div>
                 <div className="aspect-square rounded border border-border overflow-hidden opacity-50 grayscale hover:opacity-100 hover:grayscale-0 transition-all">
-                  <img src="/events/hackathon.png" className="w-full h-full object-cover" alt="" />
+                  <img src="https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&q=80&w=800" className="w-full h-full object-cover" alt="" />
                 </div>
                 <div className="aspect-square rounded border border-border overflow-hidden opacity-50 grayscale hover:opacity-100 hover:grayscale-0 transition-all">
-                  <img src="/events/gala.png" className="w-full h-full object-cover" alt="" />
+                  <img src="https://images.unsplash.com/photo-1511795409834-ef04bbd61622?auto=format&fit=crop&q=80&w=800" className="w-full h-full object-cover" alt="" />
                 </div>
               </div>
 
               {/* Mock Main Area */}
               <div className="flex-1 flex flex-col bg-background relative p-4">
                 <div className="flex-1 relative rounded border border-border overflow-hidden flex items-center justify-center mb-4 bg-card">
-                  <img ref={imageRef} src="/events/speaker-portrait.png" className="absolute inset-0 w-full h-full object-cover" alt="Preview" />
+                  <img ref={imageRef} src="https://images.unsplash.com/photo-1558008258-3256797b43f3?auto=format&fit=crop&q=80&w=800" className="absolute inset-0 w-full h-full object-cover scale-105" alt="Preview" />
                   <div ref={focusLabelRef} className="z-10 bg-surface/90 px-3 py-1.5 rounded-sm border border-border text-xs backdrop-blur font-medium shadow-lg">Focus Issue Detected</div>
                 </div>
                 

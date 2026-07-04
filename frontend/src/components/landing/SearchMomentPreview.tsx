@@ -38,7 +38,7 @@ export function SearchMomentPreview() {
       gsap.set(statusRef.current, { opacity: 0 })
       
       // Grid items start hidden but full color
-      gsap.set(gridItemsRef.current, { opacity: 0, y: 20, filter: 'grayscale(0%)' })
+      gsap.set(gridItemsRef.current.filter(Boolean), { opacity: 0, y: 20, filter: 'grayscale(0%)' })
       gsap.set(matchChipRef.current, { opacity: 0, scale: 0.8 })
 
       // Cursor infinite blink (slower, more natural)
@@ -61,19 +61,24 @@ export function SearchMomentPreview() {
       tl.to(statusRef.current, { opacity: 1, duration: 0.3 }, "typingEnd")
 
       // 5. Grid tiles populate
-      tl.to(gridItemsRef.current, { opacity: 1, y: 0, duration: 0.6, stagger: 0.1, ease: "power2.out" }, "typingEnd+=0.2")
+      tl.to(gridItemsRef.current.filter(Boolean), { opacity: 1, y: 0, duration: 0.6, stagger: 0.1, ease: "power2.out" }, "typingEnd+=0.2")
 
       // 6. Give a small pause for the grid to finish loading, then resolve
       tl.addLabel("resolveStart", "typingEnd+=1.2")
       
-      const nonMatches = gridItemsRef.current.slice(1)
+      const nonMatches = gridItemsRef.current.slice(1).filter(Boolean)
       tl.to(nonMatches, { opacity: 0.4, filter: 'grayscale(100%)', duration: 0.8, ease: "power2.inOut" }, "resolveStart")
       
       // Slowly fade out "Searching..."
       tl.to(statusRef.current, { opacity: 0, duration: 0.4 }, "resolveStart")
       
       // 7. Best match highlighted smoothly
-      tl.to(gridItemsRef.current[0], { borderColor: "hsl(var(--primary))", boxShadow: "0 0 20px rgba(var(--color-primary), 0.15)", duration: 0.6 }, "resolveStart+=0.2")
+      if (gridItemsRef.current[0]) {
+        tl.to(gridItemsRef.current[0], { scale: 1.02, duration: 0.6 }, "resolveStart+=0.2")
+        tl.add(() => {
+           gridItemsRef.current[0]?.classList.add('border-primary', 'shadow-[0_0_20px_rgba(var(--color-primary),0.15)]')
+        }, "resolveStart+=0.2")
+      }
       tl.to(matchChipRef.current, { opacity: 1, scale: 1, duration: 0.5, ease: "back.out(1.2)" }, "resolveStart+=0.4")
     })
 
@@ -82,11 +87,16 @@ export function SearchMomentPreview() {
       gsap.set(queryContainerRef.current, { text: "speaker on stage under blue lights" })
       
       // Set final state for images
-      gsap.set(gridItemsRef.current.slice(1), { opacity: 0.4, filter: 'grayscale(100%)' })
-      gsap.set(gridItemsRef.current[0], { borderColor: "hsl(var(--primary))" })
+      const nonMatchesMob = gridItemsRef.current.slice(1).filter(Boolean)
+      if (nonMatchesMob.length > 0) {
+        gsap.set(nonMatchesMob, { opacity: 0.4, filter: 'grayscale(100%)' })
+      }
+      if (gridItemsRef.current[0]) {
+        gridItemsRef.current[0].classList.add('border-primary', 'shadow-[0_0_20px_rgba(var(--color-primary),0.15)]')
+      }
       gsap.set(matchChipRef.current, { opacity: 1, scale: 1 })
 
-      const elements = [textRefs.current[0], textRefs.current[1], textRefs.current[2], searchBoxRef.current, gridRef.current]
+      const elements = [textRefs.current[0], textRefs.current[1], textRefs.current[2], searchBoxRef.current, gridRef.current].filter(Boolean)
       
       gsap.fromTo(elements, 
         { opacity: 0, y: 20 },
@@ -121,29 +131,28 @@ export function SearchMomentPreview() {
             
             {/* Results Grid */}
             <div ref={gridRef} className="grid grid-cols-2 gap-4 flex-1">
-              {/* Match */}
               <div ref={el => { gridItemsRef.current[0] = el }} className="rounded border border-border overflow-hidden relative bg-card transition-colors">
-                <img src="/events/dev-conference.png" className="w-full h-full object-cover" alt="" />
+                <img src="https://images.unsplash.com/photo-1558008258-3256797b43f3?auto=format&fit=crop&q=80&w=800" className="w-full h-full object-cover" alt="" />
                 <div ref={matchChipRef} className="absolute top-2 left-2 bg-background/95 px-2 py-1 text-xs mono-label text-primary rounded-sm border border-primary/20 backdrop-blur shadow-md">Semantic Match</div>
               </div>
               {/* Non-matches */}
               <div ref={el => { gridItemsRef.current[1] = el }} className="rounded border border-border overflow-hidden bg-card">
-                <img src="/events/networking.png" className="w-full h-full object-cover" alt="" />
+                <img src="https://images.unsplash.com/photo-1515169067868-5387ec356754?auto=format&fit=crop&q=80&w=800" className="w-full h-full object-cover" alt="" />
               </div>
               <div ref={el => { gridItemsRef.current[2] = el }} className="rounded border border-border overflow-hidden bg-card">
-                <img src="/events/hackathon.png" className="w-full h-full object-cover" alt="" />
+                <img src="https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&q=80&w=800" className="w-full h-full object-cover" alt="" />
               </div>
               <div ref={el => { gridItemsRef.current[3] = el }} className="rounded border border-border overflow-hidden bg-card">
-                <img src="/events/panel.png" className="w-full h-full object-cover" alt="" />
+                <img src="https://images.unsplash.com/photo-1511578314322-379afb476865?auto=format&fit=crop&q=80&w=800" className="w-full h-full object-cover" alt="" />
               </div>
             </div>
           </div>
           
           <div className="order-1 md:order-2">
             <div ref={el => { textRefs.current[0] = el }} className="mono-label text-primary mb-4">Semantic Discovery</div>
-            <h2 ref={el => { textRefs.current[1] = el }} className="text-3xl md:text-5xl font-semibold mb-6">Find the exact moment.</h2>
+            <h2 ref={el => { textRefs.current[1] = el }} className="text-3xl md:text-5xl font-semibold mb-6">Sorty's Instant Semantic Discovery</h2>
             <p ref={el => { textRefs.current[2] = el }} className="text-muted-foreground text-lg leading-relaxed mb-8">
-              Search by what happened, not by where someone saved the file. Sorty analyzes the semantic content of every image during ingest. Search using natural language to locate specific speakers, moments, or objects across thousands of files instantly.
+              Find the exact moment instantly with Sorty. Sorty analyzes the semantic content of every image during ingestion, allowing your team to search by what happened (not by where a file is saved) using simple natural language.
             </p>
           </div>
           

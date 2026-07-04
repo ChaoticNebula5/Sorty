@@ -32,17 +32,16 @@ class Settings(BaseSettings):
     minio_access_key: str = "sortyadmin"
     minio_secret_key: str = "sortypassword"
     minio_bucket: str = "sorty-media"
+
     minio_secure: bool = False
     minio_presigned_url_expiry_seconds: int = 3600
 
     max_upload_size_mb: int = 10
     thumbnail_size: int = 300
 
-    vision_provider: Literal["mock", "gemini", "openai", "ollama"] = "mock"
+    vision_provider: Literal["mock", "gemini", "ollama"] = "mock"
     gemini_api_key: str = ""
     gemini_vision_model: str = "gemini-2.0-flash"
-    openai_api_key: str = ""
-    openai_vision_model: str = "gpt-4o-mini"
     ollama_base_url: str = "http://host.docker.internal:11434"
     ollama_vision_model: str = "llava"
 
