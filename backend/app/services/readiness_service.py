@@ -30,6 +30,7 @@ def check_readiness() -> ReadinessReport:
         check_storage(),
         check_vision_provider(),
         check_embedding_provider(),
+        check_visual_search_provider(),
     ]
     status = "ready" if all(item.status == "ok" for item in components) else "degraded"
     return ReadinessReport(status=status, components=components)
@@ -173,4 +174,37 @@ def check_embedding_provider() -> ComponentReadiness:
         name="embedding_provider",
         status="error",
         detail=f"Unsupported embedding provider: {provider}.",
+    )
+
+
+def check_visual_search_provider() -> ComponentReadiness:
+    settings = get_settings()
+    if not settings.visual_search_enabled:
+        return ComponentReadiness(
+            name="visual_search_provider",
+            status="ok",
+            detail="visual search disabled.",
+        )
+    if not settings.visual_embedding_model:
+        return ComponentReadiness(
+            name="visual_search_provider",
+            status="error",
+            detail="VISUAL_EMBEDDING_MODEL is required.",
+        )
+    if settings.visual_embedding_dimension != 512:
+        return ComponentReadiness(
+            name="visual_search_provider",
+            status="error",
+            detail="VISUAL_EMBEDDING_DIMENSION must be 512 for the visual pgvector schema.",
+        )
+    if find_spec("sentence_transformers") is None:
+        return ComponentReadiness(
+            name="visual_search_provider",
+            status="error",
+            detail="sentence-transformers package is not installed.",
+        )
+    return ComponentReadiness(
+        name="visual_search_provider",
+        status="ok",
+        detail="CLIP visual search provider configured.",
     )

@@ -63,20 +63,6 @@ def process_batch_job(payload: dict[str, Any]) -> str:
                 try:
                     media_service.mark_media_processing(db, media)
                     temp_path = storage.download_to_temp(media.original_object_key)
-                    result = provider.analyze_image(
-                        str(temp_path),
-                        event_context=event_context,
-                    )
-                    analysis = analysis_service.upsert_ai_analysis(
-                        db,
-                        media_id=media.id,
-                        result=result,
-                        model_provider=provider.provider_name,
-                        model_name=provider.model_name,
-                        raw_response=result.model_dump(),
-                        commit=False,
-                    )
-                    media.ai_analysis = analysis
                     quality_result = quality_service.analyze_image_quality(temp_path)
                     quality_signal = quality_service.upsert_quality_signal(
                         db,
@@ -85,12 +71,6 @@ def process_batch_job(payload: dict[str, Any]) -> str:
                         commit=False,
                     )
                     media.quality_signal = quality_signal
-                    review_reasons = list(result.review_reasons or [])
-                    if (
-                        quality_result.quality_label == "blurry"
-                        and "low_quality_blur" not in review_reasons
-                    ):
-                        review_reasons.append("low_quality_blur")
                     duplicate_result = quality_service.detect_duplicate_for_media(
                         db,
                         media_id=media.id,
@@ -100,6 +80,36 @@ def process_batch_job(payload: dict[str, Any]) -> str:
                         quality_signal=quality_signal,
                         commit=False,
                     )
+
+                    result = None
+                    vision_error: Exception | None = None
+                    try:
+                        result = provider.analyze_image(
+                            str(temp_path),
+                            event_context=event_context,
+                        )
+                    except Exception as exc:
+                        vision_error = exc
+                    else:
+                        analysis = analysis_service.upsert_ai_analysis(
+                            db,
+                            media_id=media.id,
+                            result=result,
+                            model_provider=provider.provider_name,
+                            model_name=provider.model_name,
+                            raw_response=result.model_dump(),
+                            commit=False,
+                        )
+                        media.ai_analysis = analysis
+
+                    review_reasons = list(result.review_reasons or []) if result is not None else []
+                    if vision_error is not None:
+                        review_reasons.append("vision_analysis_failed")
+                    if (
+                        quality_result.quality_label == "blurry"
+                        and "low_quality_blur" not in review_reasons
+                    ):
+                        review_reasons.append("low_quality_blur")
                     if (
                         duplicate_result.is_duplicate
                         and "possible_duplicate" not in review_reasons
@@ -107,7 +117,7 @@ def process_batch_job(payload: dict[str, Any]) -> str:
                         review_reasons.append("possible_duplicate")
 
                     media_outcome = "processed"
-                    if result.needs_review or review_reasons:
+                    if result is None or result.needs_review or review_reasons:
                         review_decision = review_service.create_pending_review_decision(
                             db,
                             media_id=media.id,
@@ -132,6 +142,17 @@ def process_batch_job(payload: dict[str, Any]) -> str:
                         media_service.mark_media_processed(db, media, commit=False)
 
                     search_service.upsert_media_embedding(db, media, commit=False)
+                    try:
+                        with db.begin_nested():
+                            search_service.upsert_media_visual_embedding(
+                                db,
+                                media,
+                                temp_path,
+                                commit=False,
+                            )
+                    except Exception:
+                        # Visual search is additive; never fail media processing if CLIP is unavailable.
+                        pass
                     db.commit()
                     if media_outcome == "needs_review":
                         needs_review_count += 1

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, 
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, require_api_key
+from app.api.deps import get_db, require_admin_auth
 from app.schemas.common import APIListResponse, APIResponse, Pagination
 from app.schemas.media import (
     BatchUploadRejectedItem,
@@ -25,7 +25,7 @@ from app.services.upload_validation_service import (
 router = APIRouter(
     prefix="/api",
     tags=["media"],
-    dependencies=[Depends(require_api_key)],
+    dependencies=[Depends(require_admin_auth)],
 )
 
 

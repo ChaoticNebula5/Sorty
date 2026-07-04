@@ -48,8 +48,17 @@ def classify_blur_score(
 
 def calculate_blur_score(image: Image.Image) -> float:
     grayscale = image.convert("L")
-    edge_image = grayscale.filter(ImageFilter.FIND_EDGES)
-    return float(ImageStat.Stat(edge_image).var[0])
+    laplacian = grayscale.filter(
+        ImageFilter.Kernel(
+            (3, 3),
+            (0, 1, 0, 1, -4, 1, 0, 1, 0),
+            scale=1,
+            offset=128,
+        )
+    )
+    if laplacian.width > 2 and laplacian.height > 2:
+        laplacian = laplacian.crop((1, 1, laplacian.width - 1, laplacian.height - 1))
+    return float(ImageStat.Stat(laplacian).var[0])
 
 
 def calculate_perceptual_hash(image: Image.Image) -> str:

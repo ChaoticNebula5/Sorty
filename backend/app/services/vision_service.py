@@ -197,9 +197,6 @@ def _build_vision_prompt(event_context: dict[str, Any]) -> str:
     )
 
 
-def _build_gemini_prompt(event_context: dict[str, Any]) -> str:
-    return _build_vision_prompt(event_context)
-
 
 def _extract_json_payload(text: str, provider_name: str = "Vision provider") -> dict[str, Any]:
     cleaned = text.strip()

@@ -2,7 +2,7 @@ from collections.abc import Generator
 
 from sqlalchemy.orm import Session
 
-from app.core.auth import require_api_key
+from app.core.auth import require_admin_auth
 from app.db.session import SessionLocal
 
 
@@ -13,4 +13,4 @@ def get_db() -> Generator[Session, None, None]:
     finally:
         db.close()
 
-__all__ = ["get_db", "require_api_key"]
+__all__ = ["get_db", "require_admin_auth"]

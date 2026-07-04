@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_db, require_api_key
+from app.api.deps import get_db, require_admin_auth
 from app.schemas.common import APIListResponse, Pagination
 from app.schemas.search import SearchResultItem
 from app.services import event_service, search_service
@@ -11,7 +11,7 @@ from app.services import event_service, search_service
 router = APIRouter(
     prefix="/api",
     tags=["search"],
-    dependencies=[Depends(require_api_key)],
+    dependencies=[Depends(require_admin_auth)],
 )
 
 
@@ -46,6 +46,7 @@ def search_event_media(
     q: str = Query(min_length=2, max_length=200),
     limit: int = Query(default=20, ge=1, le=50),
     offset: int = Query(default=0, ge=0),
+    min_score: float = Query(default=0.3, ge=0, le=1),
     include_duplicates: bool = Query(default=False),
     include_blurry: bool = Query(default=True),
     include_pending: bool = Query(default=False),
@@ -68,6 +69,7 @@ def search_event_media(
         include_blurry=include_blurry,
         include_pending=include_pending,
         export_ready_only=export_ready_only,
+        min_score=min_score,
     )
     results = search_service.search_event_media(
         db,
@@ -77,7 +79,12 @@ def search_event_media(
         offset=offset,
         filters=filters,
     )
-    total = search_service.count_searchable_event_media(db, event_id, filters=filters)
+    total = search_service.count_searchable_event_media(
+        db,
+        event_id,
+        query=q,
+        filters=filters,
+    )
 
     return APIListResponse(
         data=[search_result_to_read(result) for result in results],

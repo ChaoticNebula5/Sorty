@@ -29,6 +29,11 @@ def test_check_readiness_reports_ready_when_all_components_ok(monkeypatch) -> No
         "check_embedding_provider",
         lambda: readiness_service.ComponentReadiness(name="embedding_provider", status="ok"),
     )
+    monkeypatch.setattr(
+        readiness_service,
+        "check_visual_search_provider",
+        lambda: readiness_service.ComponentReadiness(name="visual_search_provider", status="ok"),
+    )
 
     report = readiness_service.check_readiness()
 
@@ -60,6 +65,11 @@ def test_check_readiness_reports_degraded_when_any_component_fails(monkeypatch) 
         readiness_service,
         "check_embedding_provider",
         lambda: readiness_service.ComponentReadiness(name="embedding_provider", status="ok"),
+    )
+    monkeypatch.setattr(
+        readiness_service,
+        "check_visual_search_provider",
+        lambda: readiness_service.ComponentReadiness(name="visual_search_provider", status="ok"),
     )
 
     report = readiness_service.check_readiness()
@@ -222,3 +232,54 @@ def test_check_embedding_provider_reports_dimension_mismatch(monkeypatch) -> Non
     assert result.name == "embedding_provider"
     assert result.status == "error"
     assert result.detail == "EMBEDDING_DIMENSION must be 384 for the current pgvector schema."
+
+
+def test_check_visual_search_provider_reports_disabled_ok(monkeypatch) -> None:
+    monkeypatch.setattr(
+        readiness_service,
+        "get_settings",
+        lambda: SimpleNamespace(visual_search_enabled=False),
+    )
+
+    result = readiness_service.check_visual_search_provider()
+
+    assert result.name == "visual_search_provider"
+    assert result.status == "ok"
+    assert result.detail == "visual search disabled."
+
+
+def test_check_visual_search_provider_reports_clip_ok(monkeypatch) -> None:
+    monkeypatch.setattr(
+        readiness_service,
+        "get_settings",
+        lambda: SimpleNamespace(
+            visual_search_enabled=True,
+            visual_embedding_model="sentence-transformers/clip-ViT-B-32",
+            visual_embedding_dimension=512,
+        ),
+    )
+    monkeypatch.setattr(readiness_service, "find_spec", lambda package: object())
+
+    result = readiness_service.check_visual_search_provider()
+
+    assert result.name == "visual_search_provider"
+    assert result.status == "ok"
+    assert result.detail == "CLIP visual search provider configured."
+
+
+def test_check_visual_search_provider_reports_dimension_mismatch(monkeypatch) -> None:
+    monkeypatch.setattr(
+        readiness_service,
+        "get_settings",
+        lambda: SimpleNamespace(
+            visual_search_enabled=True,
+            visual_embedding_model="sentence-transformers/clip-ViT-B-32",
+            visual_embedding_dimension=384,
+        ),
+    )
+
+    result = readiness_service.check_visual_search_provider()
+
+    assert result.name == "visual_search_provider"
+    assert result.status == "error"
+    assert result.detail == "VISUAL_EMBEDDING_DIMENSION must be 512 for the visual pgvector schema."

@@ -15,7 +15,7 @@ def override_db() -> Generator[object, None, None]:
 
 
 def auth_headers() -> dict[str, str]:
-    return {"X-API-Key": get_settings().app_api_key}
+    return {"Authorization": f"Bearer {get_settings().admin_token}"}
 
 
 def make_media(**overrides: object) -> SimpleNamespace:
@@ -49,7 +49,7 @@ def test_search_requires_api_key() -> None:
     )
 
     assert response.status_code == 401
-    assert response.json()["error"]["code"] == "missing_api_key"
+    assert response.json()["error"]["code"] == "missing_admin_token"
 
 
 def test_search_rejects_short_query() -> None:
@@ -103,7 +103,7 @@ def test_search_returns_ranked_media(monkeypatch) -> None:
     monkeypatch.setattr(
         search_service,
         "count_searchable_event_media",
-        lambda db, event_id, filters=None: 1,
+        lambda db, event_id, query=None, filters=None: 1,
     )
     app.dependency_overrides[get_db] = override_db
 
@@ -134,7 +134,7 @@ def test_search_returns_ranked_media(monkeypatch) -> None:
 
 def test_search_passes_filter_params_to_service(monkeypatch) -> None:
     event_id = uuid.uuid4()
-    captured: dict[str, search_service.SearchFilters | None] = {}
+    captured: dict[str, object] = {}
 
     def fake_search_event_media(
         db,
@@ -147,7 +147,8 @@ def test_search_passes_filter_params_to_service(monkeypatch) -> None:
         captured["search"] = filters
         return []
 
-    def fake_count_searchable_event_media(db, event_id, filters=None):
+    def fake_count_searchable_event_media(db, event_id, query=None, filters=None):
+        captured["count_query"] = query
         captured["count"] = filters
         return 0
 
@@ -170,6 +171,7 @@ def test_search_passes_filter_params_to_service(monkeypatch) -> None:
                 "include_blurry": "false",
                 "include_pending": "false",
                 "export_ready_only": "true",
+                "min_score": "0.4",
             },
         )
     finally:
@@ -180,6 +182,9 @@ def test_search_passes_filter_params_to_service(monkeypatch) -> None:
         include_blurry=False,
         include_pending=False,
         export_ready_only=True,
+        min_score=0.4,
     )
     assert response.status_code == 200
-    assert captured == {"search": expected, "count": expected}
+    assert captured["search"] == expected
+    assert captured["count_query"] == "stage"
+    assert captured["count"] == expected

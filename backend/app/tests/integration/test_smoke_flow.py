@@ -21,8 +21,19 @@ def _require_base_url() -> str:
     return base_url.rstrip("/")
 
 
-def _integration_api_key() -> str:
-    return os.getenv("SORTY_INTEGRATION_API_KEY", "demo-secret").strip() or "demo-secret"
+def _integration_auth_headers() -> dict[str, str]:
+    admin_token = os.getenv("SORTY_INTEGRATION_ADMIN_TOKEN", "").strip()
+    if admin_token:
+        return {"Authorization": f"Bearer {admin_token}"}
+
+    api_key = os.getenv("SORTY_INTEGRATION_API_KEY", "").strip()
+    if api_key:
+        return {"X-API-Key": api_key}
+
+    pytest.skip(
+        "Set SORTY_INTEGRATION_ADMIN_TOKEN for bearer auth, or "
+        "SORTY_INTEGRATION_API_KEY for explicit local legacy auth."
+    )
 
 
 def _integration_timeout_seconds() -> int:
@@ -36,7 +47,7 @@ def _integration_timeout_seconds() -> int:
 @pytest.fixture(scope="session")
 def integration_client() -> httpx.Client:
     base_url = _require_base_url()
-    headers = {"X-API-Key": _integration_api_key()}
+    headers = _integration_auth_headers()
     timeout = httpx.Timeout(60.0)
     with httpx.Client(base_url=base_url, headers=headers, timeout=timeout) as client:
         yield client
@@ -290,19 +301,19 @@ def test_resume_job_completes_after_review(
     assert job_data["status"] == "waiting_for_review"
 
     review_items = _wait_for_review_queue(integration_client, event_id)
-    media_id = review_items[0]["media_id"]
-    review_payload = {
-        "status": "approved",
-        "final_primary_folder": "Highlights",
-        "final_sub_folder": "General",
-        "final_tags": ["integration"],
-        "include_in_export": True,
-    }
-    review_response = integration_client.patch(
-        f"/api/media/{media_id}/review",
-        json=review_payload,
-    )
-    review_response.raise_for_status()
+    for item in review_items:
+        review_payload = {
+            "status": "approved",
+            "final_primary_folder": "Highlights",
+            "final_sub_folder": "General",
+            "final_tags": ["integration"],
+            "include_in_export": True,
+        }
+        review_response = integration_client.patch(
+            f"/api/media/{item['media_id']}/review",
+            json=review_payload,
+        )
+        review_response.raise_for_status()
 
     resume_response = integration_client.post(f"/api/jobs/{job_id}/resume")
     resume_response.raise_for_status()

@@ -1,4 +1,5 @@
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest
@@ -46,6 +47,21 @@ def test_mock_embedding_provider_defaults_to_media_embedding_dimension() -> None
     assert provider.dimension == search_service.MEDIA_EMBEDDING_DIMENSION
 
 
+def test_mock_embedding_provider_model_name_includes_provider_identity(monkeypatch) -> None:
+    monkeypatch.setattr(
+        search_service,
+        "get_settings",
+        lambda: SimpleNamespace(
+            embedding_model="fake-model",
+            embedding_dimension=8,
+        ),
+    )
+
+    provider = search_service.MockEmbeddingProvider()
+
+    assert provider.model_name == "mock:fake-model:8"
+
+
 def test_sentence_transformers_embedding_provider_uses_fake_model(monkeypatch) -> None:
     class FakeModel:
         def encode(self, texts, normalize_embeddings=True):
@@ -91,6 +107,102 @@ def test_sentence_transformers_embedding_provider_rejects_dimension_mismatch(
         provider.embed_text("stage performance")
 
 
+def test_sentence_transformers_visual_provider_uses_visual_settings(monkeypatch) -> None:
+    class FakeModel:
+        def encode(self, items, normalize_embeddings=True):
+            assert normalize_embeddings is True
+            return [[0.1, 0.2, 0.3, 0.4]]
+
+    monkeypatch.setattr(
+        search_service,
+        "get_settings",
+        lambda: SimpleNamespace(
+            visual_embedding_model="fake-clip",
+            visual_embedding_dimension=4,
+        ),
+    )
+    monkeypatch.setattr(
+        search_service,
+        "_load_sentence_transformers_model",
+        lambda model_name: FakeModel(),
+    )
+
+    provider = search_service.SentenceTransformersVisualEmbeddingProvider()
+
+    assert provider.provider_name == "sentence-transformers-clip"
+    assert provider.model_name == "sentence-transformers-clip:fake-clip:4"
+    assert provider.embed_text("drinks") == [0.1, 0.2, 0.3, 0.4]
+
+
+def test_load_sentence_transformers_model_reuses_cached_model(monkeypatch) -> None:
+    calls: list[str] = []
+
+    class FakeSentenceTransformer:
+        def __init__(self, model_name: str) -> None:
+            calls.append(model_name)
+            self.model_name = model_name
+
+    monkeypatch.setattr(
+        search_service,
+        "_sentence_transformers_models",
+        {},
+    )
+    monkeypatch.setattr(
+        search_service,
+        "_sentence_transformers_model_lock",
+        search_service.Lock(),
+    )
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "sentence_transformers",
+        SimpleNamespace(SentenceTransformer=FakeSentenceTransformer),
+    )
+
+    first = search_service._load_sentence_transformers_model("fake-model")
+    second = search_service._load_sentence_transformers_model("fake-model")
+
+    assert first is second
+    assert calls == ["fake-model"]
+
+
+def test_load_sentence_transformers_model_deduplicates_concurrent_cold_start(
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+
+    class FakeSentenceTransformer:
+        def __init__(self, model_name: str) -> None:
+            calls.append(model_name)
+            self.model_name = model_name
+
+    monkeypatch.setattr(
+        search_service,
+        "_sentence_transformers_models",
+        {},
+    )
+    monkeypatch.setattr(
+        search_service,
+        "_sentence_transformers_model_lock",
+        search_service.Lock(),
+    )
+    monkeypatch.setitem(
+        __import__("sys").modules,
+        "sentence_transformers",
+        SimpleNamespace(SentenceTransformer=FakeSentenceTransformer),
+    )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        models = list(
+            executor.map(
+                search_service._load_sentence_transformers_model,
+                ["fake-model"] * 16,
+            )
+        )
+
+    assert len({id(model) for model in models}) == 1
+    assert calls == ["fake-model"]
+
+
 def test_get_embedding_provider_selects_sentence_transformers(monkeypatch) -> None:
     class FakeModel:
         def encode(self, texts, normalize_embeddings=True):
@@ -115,6 +227,25 @@ def test_get_embedding_provider_selects_sentence_transformers(monkeypatch) -> No
 
     assert isinstance(provider, search_service.SentenceTransformersEmbeddingProvider)
     assert provider.embed_text("query") == [0.0, 1.0, 0.0]
+
+
+def test_combine_search_rows_hybrid_ranks_visual_matches(monkeypatch) -> None:
+    text_media = make_media(id=uuid.uuid4())
+    visual_media = make_media(id=uuid.uuid4())
+
+    monkeypatch.setattr(
+        search_service,
+        "get_settings",
+        lambda: SimpleNamespace(visual_search_weight=0.8),
+    )
+
+    results = search_service._combine_search_rows(
+        [(text_media, 0.4)],
+        [(visual_media, 0.8)],
+    )
+
+    assert [result.media.id for result in results] == [visual_media.id, text_media.id]
+    assert results[0].score == pytest.approx(0.8)
 
 
 def test_build_indexed_text_prefers_review_metadata() -> None:
@@ -153,6 +284,32 @@ def test_search_filters_defaults_target_export_ready_media() -> None:
     assert filters.include_blurry is True
     assert filters.include_pending is False
     assert filters.export_ready_only is True
+
+
+def test_count_searchable_event_media_initializes_provider(monkeypatch) -> None:
+    class FakeProvider:
+        model_name = "fake-model"
+
+        def embed_text(self, text: str) -> list[float]:
+            assert text == "phone"
+            return [0.0, 1.0, 0.0]
+
+    class FakeDb:
+        def scalar(self, statement) -> int:
+            compiled = str(statement)
+            assert "media_embeddings.embedding_model" in compiled
+            return 7
+
+    monkeypatch.setattr(search_service, "get_embedding_provider", lambda: FakeProvider())
+
+    total = search_service.count_searchable_event_media(
+        FakeDb(),
+        uuid.uuid4(),
+        query="phone",
+        filters=search_service.SearchFilters(min_score=0),
+    )
+
+    assert total == 7
 
 
 def test_apply_search_filters_excludes_blurry_but_keeps_unknown_quality() -> None:

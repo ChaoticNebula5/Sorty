@@ -512,7 +512,7 @@ def test_process_batch_job_marks_job_and_media_failed(monkeypatch) -> None:
     assert calls == ["media_failed", "job_failed"]
 
 
-def test_process_batch_job_marks_partial_failed_for_single_media_failure(
+def test_process_batch_job_sends_vision_failure_to_review(
     monkeypatch,
     tmp_path,
 ) -> None:
@@ -570,6 +570,20 @@ def test_process_batch_job_marks_partial_failed_for_single_media_failure(
         lambda db, media, error_message: calls.append(f"failed:{media.id}"),
     )
     monkeypatch.setattr(
+        tasks.review_service,
+        "create_pending_review_decision",
+        lambda db, media_id, review_reasons, commit=True: calls.append(
+            f"review:{media_id}:{','.join(review_reasons)}"
+        ),
+    )
+    monkeypatch.setattr(
+        tasks.media_service,
+        "mark_media_needs_review",
+        lambda db, media, reason=None, commit=True: calls.append(
+            f"needs_review:{media.id}:{reason}"
+        ),
+    )
+    monkeypatch.setattr(
         tasks.job_service,
         "mark_job_finished",
         lambda db, job, processed_files, failed_files, needs_review_count: calls.append(
@@ -582,8 +596,10 @@ def test_process_batch_job_marks_partial_failed_for_single_media_failure(
 
     assert result == str(job.id)
     assert f"processed:{first_media.id}" in calls
-    assert f"failed:{second_media.id}" in calls
-    assert "finished:1:1:0" in calls
+    assert f"review:{second_media.id}:vision_analysis_failed" in calls
+    assert f"needs_review:{second_media.id}:vision_analysis_failed" in calls
+    assert f"failed:{second_media.id}" not in calls
+    assert "finished:1:0:1" in calls
     assert "graph" in calls
 
 

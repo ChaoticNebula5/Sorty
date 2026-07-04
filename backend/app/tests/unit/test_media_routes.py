@@ -81,7 +81,7 @@ def override_fake_db(fake_db: FakeDb):
 
 
 def auth_headers() -> dict[str, str]:
-    return {"X-API-Key": get_settings().app_api_key}
+    return {"Authorization": f"Bearer {get_settings().admin_token}"}
 
 
 def make_image_bytes() -> bytes:
@@ -175,7 +175,7 @@ def test_batch_upload_requires_api_key() -> None:
     )
 
     assert response.status_code == 401
-    assert response.json()["error"]["code"] == "missing_api_key"
+    assert response.json()["error"]["code"] == "missing_admin_token"
 
 
 def test_batch_upload_rejects_missing_event(monkeypatch) -> None:
@@ -568,7 +568,7 @@ def test_get_media_file_requires_api_key() -> None:
     response = TestClient(app).get(f"/api/media/{uuid.uuid4()}/file")
 
     assert response.status_code == 401
-    assert response.json()["error"]["code"] == "missing_api_key"
+    assert response.json()["error"]["code"] == "missing_admin_token"
 
 
 def test_get_media_thumbnail_returns_404_for_missing_media(monkeypatch) -> None:

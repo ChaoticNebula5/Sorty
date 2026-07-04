@@ -99,15 +99,6 @@ def attach_media_to_batch_job(
     db.commit()
 
 
-def mark_batch_media_processing(db: Session, batch_job_id: uuid.UUID) -> None:
-    media_assets = list(
-        db.scalars(select(MediaAsset).where(MediaAsset.batch_job_id == batch_job_id))
-    )
-    for media in media_assets:
-        media.processing_status = "processing"
-
-    db.commit()
-
 
 def mark_media_processing(db: Session, media: MediaAsset) -> MediaAsset:
     media.processing_status = "processing"
@@ -156,16 +147,6 @@ def mark_media_failed(
     return media
 
 
-def mark_batch_media_processed(db: Session, batch_job_id: uuid.UUID) -> None:
-    media_assets = list(
-        db.scalars(select(MediaAsset).where(MediaAsset.batch_job_id == batch_job_id))
-    )
-    for media in media_assets:
-        media.processing_status = "processed"
-        media.processing_error = None
-
-    db.commit()
-
 
 def mark_batch_media_failed(
     db: Session,
@@ -196,6 +177,42 @@ def list_event_media(
             .limit(limit)
             .offset(offset)
         )
+    )
+
+
+def list_public_event_media(
+    db: Session,
+    event_id: uuid.UUID,
+    limit: int = 50,
+    offset: int = 0,
+) -> list[MediaAsset]:
+    return list(
+        db.scalars(
+            _public_media_statement(event_id)
+            .order_by(MediaAsset.created_at.desc(), MediaAsset.id.asc())
+            .limit(limit)
+            .offset(offset)
+        )
+    )
+
+
+def count_public_event_media(db: Session, event_id: uuid.UUID) -> int:
+    statement = (
+        select(func.count())
+        .select_from(MediaAsset)
+        .join(MediaAsset.review_decision)
+        .where(*_public_media_conditions(event_id))
+    )
+    return db.scalar(statement) or 0
+
+
+def get_public_event_media(
+    db: Session,
+    event_id: uuid.UUID,
+    media_id: uuid.UUID,
+) -> MediaAsset | None:
+    return db.scalar(
+        _public_media_statement(event_id).where(MediaAsset.id == media_id)
     )
 
 
@@ -289,6 +306,26 @@ def get_event_media_summary(
 
 def get_media_asset(db: Session, media_id: uuid.UUID) -> MediaAsset | None:
     return db.scalar(select(MediaAsset).where(MediaAsset.id == media_id))
+
+
+def _public_media_statement(event_id: uuid.UUID):
+    return (
+        select(MediaAsset)
+        .join(MediaAsset.review_decision)
+        .outerjoin(MediaAsset.ai_analysis)
+        .outerjoin(MediaAsset.quality_signal)
+        .where(*_public_media_conditions(event_id))
+    )
+
+
+def _public_media_conditions(event_id: uuid.UUID):
+    return (
+        MediaAsset.event_id == event_id,
+        MediaAsset.processing_status == "processed",
+        MediaAsset.thumbnail_object_key.is_not(None),
+        ReviewDecision.status.in_(("approved", "edited")),
+        ReviewDecision.include_in_export.is_(True),
+    )
 
 
 def _count_event_media_where(db: Session, event_id: uuid.UUID, *conditions) -> int:
