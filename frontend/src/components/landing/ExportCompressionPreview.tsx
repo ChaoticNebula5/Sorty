@@ -119,7 +119,7 @@ export function ExportCompressionPreview() {
             <div 
               key={`tile-${i}`} 
               ref={el => { tilesRef.current[i] = el }} 
-              className="absolute size-24 md:size-32 rounded-md shadow-[0_15px_40px_rgba(0,0,0,0.5)] border border-border/50 overflow-hidden bg-surface flex items-center justify-center z-10"
+              className="absolute size-24 md:size-32 rounded-md shadow-lg border border-border overflow-hidden bg-surface flex items-center justify-center z-10"
             >
               <img src={src} className="w-full h-full object-cover opacity-80" alt="" />
             </div>
@@ -140,7 +140,7 @@ export function ExportCompressionPreview() {
                   <div 
                     key={`label-${i}`} 
                     ref={el => { labelsRef.current[i] = el }}
-                    className={`absolute ${positions[i]} flex items-center gap-2 bg-card/90 backdrop-blur border border-border px-4 py-2 rounded-md shadow-xl`}
+                    className={`absolute ${positions[i]} flex items-center gap-2 bg-card border border-border px-4 py-2 rounded-md shadow-md`}
                   >
                     <Icon className="size-4 text-primary" />
                     <span className="text-sm font-medium text-foreground">{item.text}</span>
@@ -151,13 +151,12 @@ export function ExportCompressionPreview() {
           </div>
 
           {/* Final ZIP Object */}
-          <div ref={zipObjectRef} className="relative z-30 w-72 aspect-square rounded-full border border-border/50 bg-surface flex flex-col items-center justify-center shadow-[0_30px_80px_rgba(0,0,0,0.7)] overflow-hidden group">
-            <div className="absolute inset-0 bg-primary/5 transition-colors group-hover:bg-primary/10" />
-            <FileArchive className="size-16 text-primary mb-4 transition-transform group-hover:scale-110 duration-500" />
-            <div className="font-semibold text-xl text-foreground">Export_Pack.zip</div>
-            <div className="mono-label text-muted-foreground mt-2">1,204 Files • 4.2 GB</div>
+          <div ref={zipObjectRef} className="relative z-30 w-72 aspect-square rounded-full border border-border bg-surface hover:bg-elevated transition-colors duration-300 flex flex-col items-center justify-center shadow-xl overflow-hidden group">
+            <FileArchive className="relative z-10 size-16 text-primary mb-4 transition-transform group-hover:scale-110 duration-500" />
+            <div className="relative z-10 font-semibold text-xl text-foreground">Export_Pack.zip</div>
+            <div className="relative z-10 mono-label text-muted-foreground mt-2">1,204 Files • 4.2 GB</div>
             
-            <div ref={statusChipRef} className="absolute bottom-8 bg-ok/10 text-ok border border-ok/20 px-3 py-1 rounded-full text-[10px] font-bold tracking-wider shadow-[0_0_15px_rgba(var(--color-ok),0.2)]">
+            <div ref={statusChipRef} className="absolute bottom-8 z-10 bg-surface text-ok border border-border px-3 py-1 rounded-full text-[10px] font-bold tracking-wider shadow-sm group-hover:bg-card transition-colors duration-300">
               READY FOR DELIVERY
             </div>
           </div>

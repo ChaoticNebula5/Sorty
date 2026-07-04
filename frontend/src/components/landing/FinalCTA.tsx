@@ -4,9 +4,6 @@ import { Link } from 'react-router-dom'
 export function FinalCTA() {
   return (
     <section className="relative py-32 bg-background border-t border-border/10 overflow-hidden">
-      {/* Subtle background glow */}
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[800px] h-[400px] bg-primary/5 blur-[100px] rounded-full pointer-events-none" />
-      
       <div className="container relative z-10 mx-auto px-6 max-w-4xl text-center">
         <h2 className="text-4xl md:text-6xl font-semibold mb-8">
           Ready to let Sorty sort it out?
@@ -16,10 +13,10 @@ export function FinalCTA() {
         </p>
         <Link 
           to="/" 
-          className="inline-flex items-center gap-2 rounded-sm bg-primary px-8 py-4 text-base font-medium text-primary-foreground transition-all hover:bg-primary/90 hover:scale-105"
+          className="inline-flex items-center gap-2 rounded-sm bg-primary px-8 py-4 text-base font-medium text-primary-foreground transition-all hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background"
         >
           Open Dashboard
-          <ArrowRight className="size-5 transition-transform group-hover:translate-x-1" />
+          <ArrowRight className="size-5 transition-transform" />
         </Link>
       </div>
     </section>

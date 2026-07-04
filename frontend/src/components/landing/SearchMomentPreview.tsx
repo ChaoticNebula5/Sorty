@@ -76,7 +76,7 @@ export function SearchMomentPreview() {
       if (gridItemsRef.current[0]) {
         tl.to(gridItemsRef.current[0], { scale: 1.02, duration: 0.6 }, "resolveStart+=0.2")
         tl.add(() => {
-           gridItemsRef.current[0]?.classList.add('border-primary', 'shadow-[0_0_20px_rgba(var(--color-primary),0.15)]')
+           gridItemsRef.current[0]?.classList.add('border-primary', 'shadow-md')
         }, "resolveStart+=0.2")
       }
       tl.to(matchChipRef.current, { opacity: 1, scale: 1, duration: 0.5, ease: "back.out(1.2)" }, "resolveStart+=0.4")
@@ -92,7 +92,7 @@ export function SearchMomentPreview() {
         gsap.set(nonMatchesMob, { opacity: 0.4, filter: 'grayscale(100%)' })
       }
       if (gridItemsRef.current[0]) {
-        gridItemsRef.current[0].classList.add('border-primary', 'shadow-[0_0_20px_rgba(var(--color-primary),0.15)]')
+        gridItemsRef.current[0].classList.add('border-primary', 'shadow-md')
       }
       gsap.set(matchChipRef.current, { opacity: 1, scale: 1 })
 
@@ -133,7 +133,7 @@ export function SearchMomentPreview() {
             <div ref={gridRef} className="grid grid-cols-2 gap-4 flex-1">
               <div ref={el => { gridItemsRef.current[0] = el }} className="rounded border border-border overflow-hidden relative bg-card transition-colors">
                 <img src="https://images.unsplash.com/photo-1558008258-3256797b43f3?auto=format&fit=crop&q=80&w=800" className="w-full h-full object-cover" alt="" />
-                <div ref={matchChipRef} className="absolute top-2 left-2 bg-background/95 px-2 py-1 text-xs mono-label text-primary rounded-sm border border-primary/20 backdrop-blur shadow-md">Semantic Match</div>
+                <div ref={matchChipRef} className="absolute top-2 left-2 bg-card px-2 py-1 text-xs mono-label text-secondary rounded-sm border border-secondary/20 shadow-sm">Semantic Match</div>
               </div>
               {/* Non-matches */}
               <div ref={el => { gridItemsRef.current[1] = el }} className="rounded border border-border overflow-hidden bg-card">

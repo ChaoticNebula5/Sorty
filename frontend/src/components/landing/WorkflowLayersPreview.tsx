@@ -16,12 +16,12 @@ const layersData = [
 
 const getToneClasses = (tone: string) => {
   switch(tone) {
-    case 'info': return 'bg-info/10 text-info border-info/20'
-    case 'primary': return 'bg-primary/10 text-primary border-primary/20'
+    case 'info': return 'bg-surface text-foreground border-border'
+    case 'primary': return 'bg-secondary/10 text-secondary border-secondary/20'
     case 'warn': return 'bg-warn/10 text-warn border-warn/20'
-    case 'ok': return 'bg-ok/10 text-ok border-ok/20'
-    case 'foreground': return 'bg-foreground/10 text-foreground border-foreground/20'
-    default: return 'bg-muted/10 text-muted-foreground border-border'
+    case 'ok': return 'bg-surface text-foreground border-border'
+    case 'foreground': return 'bg-surface text-foreground border-border'
+    default: return 'bg-surface text-muted-foreground border-border'
   }
 }
 
@@ -59,12 +59,12 @@ export function WorkflowLayersPreview() {
               if (!layer) return
               
               if (i === activeIdx) {
-                layer.classList.add('border-primary', 'shadow-[0_0_30px_rgba(var(--color-primary),0.15)]')
-                layer.classList.remove('border-border/50', 'shadow-[0_15px_50px_rgba(0,0,0,0.5)]')
+                layer.classList.add('border-primary', 'shadow-xl', 'shadow-black/50')
+                layer.classList.remove('border-border', 'shadow-none')
                 layer.setAttribute('data-active', 'true')
               } else {
-                layer.classList.remove('border-primary', 'shadow-[0_0_30px_rgba(var(--color-primary),0.15)]')
-                layer.classList.add('border-border/50', 'shadow-[0_15px_50px_rgba(0,0,0,0.5)]')
+                layer.classList.remove('border-primary', 'shadow-xl', 'shadow-black/50')
+                layer.classList.add('border-border', 'shadow-none')
                 layer.setAttribute('data-active', 'false')
               }
             })
@@ -131,13 +131,12 @@ export function WorkflowLayersPreview() {
             <div 
               key={layer.id}
               ref={el => { layersRef.current[i] = el }}
-              className="md:absolute md:top-1/2 md:left-1/2 relative w-full max-w-2xl bg-card border border-border/50 rounded-md shadow-[0_15px_50px_rgba(0,0,0,0.5)] overflow-hidden flex flex-col sm:flex-row mb-6 md:mb-0 transition-colors duration-300 group"
+              className="md:absolute md:top-1/2 md:left-1/2 relative w-full max-w-2xl bg-card border border-border rounded-md shadow-none overflow-hidden flex flex-col sm:flex-row mb-6 md:mb-0 transition-colors duration-300 group"
               data-active="false"
             >
               {/* Abstract Icon Graphic */}
               <div className="h-32 sm:h-auto sm:w-1/3 relative border-b sm:border-b-0 sm:border-r border-border overflow-hidden bg-surface flex items-center justify-center">
-                 <div className="absolute inset-0 bg-primary/20 opacity-0 group-data-[active=true]:opacity-100 transition-opacity duration-700 blur-2xl rounded-full scale-150" />
-                 <layer.icon className="w-16 h-16 opacity-30 text-muted-foreground group-data-[active=true]:text-primary group-data-[active=true]:opacity-100 transition-all duration-500 z-10 drop-shadow-md group-data-[active=true]:scale-110" />
+                 <layer.icon className="w-16 h-16 opacity-30 text-muted-foreground group-data-[active=true]:text-primary group-data-[active=true]:opacity-100 transition-all duration-500 z-10" />
                  <div className="absolute inset-0 bg-gradient-to-t sm:bg-gradient-to-r from-card to-transparent pointer-events-none z-20" />
               </div>
               

@@ -112,7 +112,7 @@ export function ReviewFocusPreview() {
             </ul>
           </div>
           
-          <div ref={cardRef} className="relative rounded-md border border-border/50 bg-surface flex flex-col shadow-[0_20px_60px_rgba(0,0,0,0.6)] overflow-hidden text-sm">
+          <div ref={cardRef} className="relative rounded-md border border-border bg-card flex flex-col shadow-xl overflow-hidden text-sm">
             {/* Mock Header */}
             <div className="flex h-10 items-center justify-between border-b border-border bg-card px-3">
               <span className="mono-label text-muted-foreground text-[10px]">Queue Progress: 14 items</span>
@@ -121,35 +121,35 @@ export function ReviewFocusPreview() {
             
             <div className="flex min-h-[300px]">
               {/* Mock Sidebar Thumbnails */}
-              <div ref={thumbsRef} className="w-16 border-r border-border flex flex-col gap-2 p-2 bg-surface/50">
-                <div className="aspect-square rounded border-2 border-primary overflow-hidden">
+              <div ref={thumbsRef} className="w-16 border-r border-border flex flex-col gap-2 p-2 bg-surface">
+                <button className="aspect-square rounded border-2 border-primary overflow-hidden focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background">
                   <img src="https://images.unsplash.com/photo-1558008258-3256797b43f3?auto=format&fit=crop&q=80&w=800" className="w-full h-full object-cover" alt="" />
-                </div>
-                <div className="aspect-square rounded border border-border overflow-hidden opacity-50 grayscale hover:opacity-100 hover:grayscale-0 transition-all">
+                </button>
+                <button className="aspect-square rounded border border-border overflow-hidden opacity-50 grayscale hover:opacity-100 hover:grayscale-0 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background">
                   <img src="https://images.unsplash.com/photo-1504384308090-c894fdcc538d?auto=format&fit=crop&q=80&w=800" className="w-full h-full object-cover" alt="" />
-                </div>
-                <div className="aspect-square rounded border border-border overflow-hidden opacity-50 grayscale hover:opacity-100 hover:grayscale-0 transition-all">
+                </button>
+                <button className="aspect-square rounded border border-border overflow-hidden opacity-50 grayscale hover:opacity-100 hover:grayscale-0 transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background">
                   <img src="https://images.unsplash.com/photo-1511795409834-ef04bbd61622?auto=format&fit=crop&q=80&w=800" className="w-full h-full object-cover" alt="" />
-                </div>
+                </button>
               </div>
 
               {/* Mock Main Area */}
               <div className="flex-1 flex flex-col bg-background relative p-4">
-                <div className="flex-1 relative rounded border border-border overflow-hidden flex items-center justify-center mb-4 bg-card">
+                <div className="flex-1 relative rounded border border-border overflow-hidden flex items-center justify-center mb-4 bg-elevated">
                   <img ref={imageRef} src="https://images.unsplash.com/photo-1558008258-3256797b43f3?auto=format&fit=crop&q=80&w=800" className="absolute inset-0 w-full h-full object-cover scale-105" alt="Preview" />
-                  <div ref={focusLabelRef} className="z-10 bg-surface/90 px-3 py-1.5 rounded-sm border border-border text-xs backdrop-blur font-medium shadow-lg">Focus Issue Detected</div>
+                  <div ref={focusLabelRef} className="z-10 bg-card px-3 py-1.5 rounded-sm border border-border text-xs font-medium shadow-sm">Focus Issue Detected</div>
                 </div>
                 
                 {/* Mock Actions */}
                 <div ref={actionsRef} className="flex justify-center gap-4 border-t border-border/50 pt-3">
                   <div className="flex flex-col items-center gap-1 text-muted-foreground">
-                    <div className="size-8 rounded-full border border-border bg-surface flex items-center justify-center hover:bg-muted hover:text-foreground transition-colors cursor-pointer">✕</div>
+                    <button className="size-8 rounded-full border border-border bg-surface flex items-center justify-center hover:bg-muted hover:text-foreground transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background">✕</button>
                   </div>
                   <div className="flex flex-col items-center gap-1">
-                    <div className="size-10 rounded-full border border-ok/50 bg-ok/10 text-ok flex items-center justify-center hover:bg-ok/20 transition-colors cursor-pointer shadow-[0_0_15px_rgba(var(--color-ok),0.2)]">✓</div>
+                    <button className="size-10 rounded-full border border-ok/50 bg-ok/10 text-ok flex items-center justify-center hover:bg-ok/20 transition-colors cursor-pointer shadow-none focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ok focus-visible:ring-offset-2 focus-visible:ring-offset-background">✓</button>
                   </div>
                   <div className="flex flex-col items-center gap-1 text-muted-foreground">
-                    <div className="size-8 rounded-full border border-border bg-surface flex items-center justify-center hover:bg-muted hover:text-foreground transition-colors cursor-pointer">⚑</div>
+                    <button className="size-8 rounded-full border border-border bg-surface flex items-center justify-center hover:bg-muted hover:text-foreground transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background">⚑</button>
                   </div>
                 </div>
               </div>

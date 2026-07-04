@@ -123,6 +123,8 @@ export function HeroChaos() {
 
         </div>
       </div>
+      {/* Subtle overlay to guarantee text readability against moving images */}
+      <div className="absolute inset-0 bg-background/60 pointer-events-none z-[1]" />
 
       <div className="relative z-10 flex flex-col items-center text-center max-w-4xl px-6">
         <div ref={el => { textRefs.current[0] = el }} className="mono-label text-primary mb-6">Sorty: The Intelligent Event Media Pipeline</div>
@@ -140,18 +142,18 @@ export function HeroChaos() {
               e.preventDefault();
               document.getElementById('workflow-layers')?.scrollIntoView({ behavior: 'smooth' })
             }}
-            className="group flex items-center gap-2 rounded-sm bg-primary px-8 py-4 text-base font-medium text-primary-foreground transition-all hover:bg-primary/90 hover:scale-105 w-full sm:w-auto justify-center"
+            className="group flex items-center gap-2 rounded-sm bg-primary px-8 py-4 text-base font-medium text-primary-foreground transition-all hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full sm:w-auto justify-center"
           >
             Watch the Workflow
-            <ChevronDown className="size-5 transition-transform group-hover:translate-y-1" />
+            <ChevronDown className="size-5 transition-transform" />
           </a>
 
           <Link
             to="/"
-            className="group flex items-center gap-2 rounded-sm border border-border/50 bg-background/50 backdrop-blur-sm px-8 py-4 text-base font-medium text-foreground transition-all hover:bg-muted hover:border-border w-full sm:w-auto justify-center"
+            className="group flex items-center gap-2 rounded-sm border border-border bg-transparent px-8 py-4 text-base font-medium text-foreground transition-all hover:bg-surface focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary focus-visible:ring-offset-2 focus-visible:ring-offset-background w-full sm:w-auto justify-center"
           >
             Open Dashboard
-            <ArrowRight className="size-5 transition-transform group-hover:translate-x-1" />
+            <ArrowRight className="size-5 transition-transform" />
           </Link>
         </div>
 
