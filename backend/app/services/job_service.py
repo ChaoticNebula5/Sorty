@@ -147,12 +147,16 @@ def mark_job_finished(
     job.needs_review_count = needs_review_count
     job.completed_at = datetime.now(UTC)
 
-    if failed_files:
+    if needs_review_count:
+        job.status = "waiting_for_review"
+        job.error_message = (
+            "One or more media assets failed processing."
+            if failed_files
+            else None
+        )
+    elif failed_files:
         job.status = "partial_failed"
         job.error_message = "One or more media assets failed processing."
-    elif needs_review_count:
-        job.status = "waiting_for_review"
-        job.error_message = None
     else:
         job.status = "completed"
         job.error_message = None

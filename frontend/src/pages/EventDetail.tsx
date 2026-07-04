@@ -1,7 +1,7 @@
 import { useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { getEvent } from '@/api/events'
+import { getEvent, getEventJobs } from '@/api/events'
 import { uploadMediaBatch, getJobStatus } from '@/api/jobs'
 import { updateEventPublicSettings } from '@/api/events'
 import { UploadCloud, Loader2, CheckCircle2, AlertCircle, Clock, Globe, Link as LinkIcon, Copy } from 'lucide-react'
@@ -11,6 +11,7 @@ import type { BatchJob } from '@/api/types'
 
 export function EventDetail() {
   const { eventId } = useParams()
+  const queryClient = useQueryClient()
   
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
   const [uploadProgress, setUploadProgress] = useState(0)
@@ -19,6 +20,16 @@ export function EventDetail() {
     queryKey: ['event', eventId],
     queryFn: () => getEvent(eventId!),
     enabled: !!eventId,
+  })
+
+  const { data: jobsData } = useQuery({
+    queryKey: ['event-jobs', eventId],
+    queryFn: () => getEventJobs(eventId!),
+    enabled: !!eventId,
+    refetchInterval: (query) => {
+      const jobs = query.state.data?.data || []
+      return jobs.some((job) => ['queued', 'processing', 'reviewed'].includes(job.status)) ? 3000 : false
+    },
   })
 
   // Poll Job Status if we have an active job
@@ -38,9 +49,10 @@ export function EventDetail() {
   const uploadMutation = useMutation({
     mutationFn: (files: File[]) => uploadMediaBatch(eventId!, files, (p) => setUploadProgress(p)),
     onSuccess: (data) => {
-      if (data.data?.id) {
-        setActiveJobId(data.data.id)
+      if (data.data?.job_id) {
+        setActiveJobId(data.data.job_id)
       }
+      queryClient.invalidateQueries({ queryKey: ['event-jobs', eventId] })
       setUploadProgress(0) // reset after upload
     },
     onError: () => {
@@ -57,7 +69,9 @@ export function EventDetail() {
   const { getRootProps, getInputProps, isDragActive } = useDropzone({ onDrop })
 
   const event = eventData?.data
-  const job = jobData?.data
+  const jobs = jobsData?.data || []
+  const activeJobFromList = activeJobId ? jobs.find((item) => item.id === activeJobId) : null
+  const job = jobData?.data || activeJobFromList || jobs[0] || null
 
   if (isEventError) {
     return (
@@ -173,8 +187,39 @@ export function EventDetail() {
             </div>
           )}
 
+          {jobs.length > 0 && (
+            <JobHistory jobs={jobs} activeJobId={job?.id || null} />
+          )}
+
           <PublicSharingPanel event={event} />
         </div>
+      </div>
+    </div>
+  )
+}
+
+function JobHistory({ jobs, activeJobId }: { jobs: BatchJob[]; activeJobId: string | null }) {
+  return (
+    <div className="overflow-hidden rounded-md border border-border bg-card">
+      <div className="border-b border-border px-4 py-3">
+        <h2 className="text-sm font-semibold text-foreground">Recent Batch Jobs</h2>
+      </div>
+      <div className="divide-y divide-border">
+        {jobs.slice(0, 5).map((job) => (
+          <div key={job.id} className="flex items-center justify-between gap-3 px-4 py-3">
+            <div className="min-w-0">
+              <p className="mono-label truncate text-muted-foreground">
+                {job.id}
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                {job.processed_files}/{job.total_files} processed - {job.needs_review_count} review - {job.failed_files} errors
+              </p>
+            </div>
+            <StatusChip tone={job.status === 'failed' ? 'danger' : job.status === 'completed' ? 'ok' : job.status === 'waiting_for_review' ? 'warn' : 'info'}>
+              {job.id === activeJobId ? 'Viewing ' : ''}{job.status}
+            </StatusChip>
+          </div>
+        ))}
       </div>
     </div>
   )
@@ -235,8 +280,8 @@ function JobTracker({ job }: { job: BatchJob }) {
         <div className="flex flex-col gap-3">
           {stages.map((stage, idx) => {
             const Icon = stage.icon
-            const isPast = idx < activeIndex || job.status === 'completed'
-            const isCurrent = idx === activeIndex && !['completed', 'failed', 'partial_failed'].includes(job.status)
+            const isPast = idx < activeIndex || job.status === 'completed' || (job.status === 'reviewed' && idx === activeIndex)
+            const isCurrent = idx === activeIndex && !['reviewed', 'completed', 'failed', 'partial_failed'].includes(job.status)
             
             let color = 'text-muted-foreground'
             if (isCurrent) color = 'text-primary'
@@ -264,6 +309,17 @@ function JobTracker({ job }: { job: BatchJob }) {
               className="flex w-full items-center justify-center gap-2 rounded-sm bg-warn px-4 py-2 text-sm font-medium text-warn-foreground text-background transition-opacity hover:opacity-90"
             >
               Start Review Queue
+            </Link>
+          </div>
+        )}
+
+        {job.status === 'reviewed' && (
+          <div className="mt-6">
+            <Link
+              to={`/events/${job.event_id}/review`}
+              className="flex w-full items-center justify-center gap-2 rounded-sm bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90"
+            >
+              Resume Processing
             </Link>
           </div>
         )}

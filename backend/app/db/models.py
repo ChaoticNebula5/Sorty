@@ -216,6 +216,10 @@ class MediaAsset(TimestampMixin, Base):
         back_populates="media",
         cascade="all, delete-orphan",
     )
+    media_visual_embedding: Mapped["MediaVisualEmbedding | None"] = relationship(
+        back_populates="media",
+        cascade="all, delete-orphan",
+    )
 
 
 class AIAnalysis(Base):
@@ -462,6 +466,31 @@ class MediaEmbedding(Base):
     )
 
     media: Mapped[MediaAsset] = relationship(back_populates="media_embedding")
+
+
+class MediaVisualEmbedding(Base):
+    __tablename__ = "media_visual_embeddings"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        primary_key=True,
+        default=uuid.uuid4,
+    )
+    media_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("media_assets.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    embedding: Mapped[list[float]] = mapped_column(Vector(512), nullable=False)
+    embedding_model: Mapped[str] = mapped_column(String(120), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    media: Mapped[MediaAsset] = relationship(back_populates="media_visual_embedding")
 
 
 class ExportJob(Base):

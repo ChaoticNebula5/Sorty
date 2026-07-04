@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     embedding_provider: Literal["mock", "sentence-transformers"] = "sentence-transformers"
     embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"
     embedding_dimension: int = 384
+    visual_search_enabled: bool = False
+    visual_embedding_model: str = "sentence-transformers/clip-ViT-B-32"
+    visual_embedding_dimension: int = 512
+    visual_search_weight: float = 0.7
+    visual_search_min_score: float = 0.18
 
     langgraph_auto_setup_checkpointer: bool = False
 

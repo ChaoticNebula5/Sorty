@@ -28,7 +28,7 @@ function Sidebar({ activeEventId }: { activeEventId: string | null }) {
     if (activeEventId) {
       if (item.label === 'Review Queue') return { ...item, href: `/events/${activeEventId}/review` }
       if (item.label === 'Search & Export') return { ...item, href: `/events/${activeEventId}/search` }
-      if (item.label === 'Upload & Processing') return { ...item, href: `/events/${activeEventId}` }
+      if (item.label === 'Upload & Processing') return { ...item, href: `/events/${activeEventId}`, end: true }
     }
     return item
   })
@@ -131,7 +131,7 @@ export function AppShell() {
     if (activeEventId) {
       if (item.label === 'Review Queue') return { ...item, href: `/events/${activeEventId}/review` }
       if (item.label === 'Search & Export') return { ...item, href: `/events/${activeEventId}/search` }
-      if (item.label === 'Upload & Processing') return { ...item, href: `/events/${activeEventId}` }
+      if (item.label === 'Upload & Processing') return { ...item, href: `/events/${activeEventId}`, end: true }
     }
     return item
   })

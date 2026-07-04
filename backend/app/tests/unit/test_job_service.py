@@ -68,6 +68,62 @@ def test_mark_job_partial_failed_updates_progress_counts() -> None:
     assert db.refreshed is True
 
 
+def test_mark_job_finished_prioritizes_review_before_partial_failure() -> None:
+    db = FakeDb()
+    job = SimpleNamespace(
+        status="processing",
+        processed_files=0,
+        failed_files=0,
+        needs_review_count=0,
+        error_message=None,
+        completed_at=None,
+    )
+
+    result = job_service.mark_job_finished(
+        db,
+        job,
+        processed_files=2,
+        failed_files=1,
+        needs_review_count=1,
+    )
+
+    assert result is job
+    assert job.status == "waiting_for_review"
+    assert job.processed_files == 2
+    assert job.failed_files == 1
+    assert job.needs_review_count == 1
+    assert job.error_message == "One or more media assets failed processing."
+    assert job.completed_at is not None
+    assert db.committed is True
+    assert db.refreshed is True
+
+
+def test_mark_job_finished_uses_partial_failure_when_no_review_needed() -> None:
+    db = FakeDb()
+    job = SimpleNamespace(
+        status="processing",
+        processed_files=0,
+        failed_files=0,
+        needs_review_count=0,
+        error_message=None,
+        completed_at=None,
+    )
+
+    result = job_service.mark_job_finished(
+        db,
+        job,
+        processed_files=2,
+        failed_files=1,
+        needs_review_count=0,
+    )
+
+    assert result is job
+    assert job.status == "partial_failed"
+    assert job.error_message == "One or more media assets failed processing."
+    assert db.committed is True
+    assert db.refreshed is True
+
+
 def test_mark_job_resume_completed_updates_completion_fields() -> None:
     db = FakeDb()
     job = SimpleNamespace(

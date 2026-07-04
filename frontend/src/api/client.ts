@@ -8,6 +8,23 @@ export const apiClient = axios.create({
   },
 })
 
+export function resolveApiUrl(url: string): string {
+  if (url.startsWith('http')) {
+    return url
+  }
+
+  const baseUrl = (import.meta.env.VITE_API_BASE_URL || '/api').replace(/\/+$/, '')
+  if (url.startsWith('/api')) {
+    if (/^https?:\/\//i.test(baseUrl)) {
+      const apiRoot = baseUrl.endsWith('/api') ? baseUrl.slice(0, -4) : baseUrl
+      return `${apiRoot}${url}`
+    }
+    return url
+  }
+
+  return `${baseUrl}${url.startsWith('/') ? url : `/${url}`}`
+}
+
 apiClient.interceptors.request.use((config) => {
   const token = getAdminToken()
   if (token) {

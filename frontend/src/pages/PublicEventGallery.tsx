@@ -1,8 +1,11 @@
 
 import { useParams } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useInfiniteQuery, useQuery } from '@tanstack/react-query'
 import { getPublicEvent, getPublicEventMedia } from '@/api/events'
+import { resolveApiUrl } from '@/api/client'
 import { Loader2, AlertCircle, ImageIcon } from 'lucide-react'
+
+const PUBLIC_MEDIA_PAGE_SIZE = 50
 
 export function PublicEventGallery() {
   const { publicSlug } = useParams<{ publicSlug: string }>()
@@ -13,10 +16,25 @@ export function PublicEventGallery() {
     enabled: !!publicSlug,
   })
 
-  const { data: mediaData, isLoading: isMediaLoading } = useQuery({
+  const {
+    data: mediaData,
+    isLoading: isMediaLoading,
+    isFetchingNextPage,
+    fetchNextPage,
+    hasNextPage,
+  } = useInfiniteQuery({
     queryKey: ['publicEventMedia', publicSlug],
-    queryFn: () => getPublicEventMedia(publicSlug!),
+    queryFn: ({ pageParam }) => getPublicEventMedia(
+      publicSlug!,
+      PUBLIC_MEDIA_PAGE_SIZE,
+      pageParam,
+    ),
     enabled: !!publicSlug,
+    initialPageParam: 0,
+    getNextPageParam: (lastPage) => {
+      const nextOffset = lastPage.pagination.offset + lastPage.pagination.limit
+      return nextOffset < lastPage.pagination.total ? nextOffset : undefined
+    },
   })
 
   if (isEventError) {
@@ -38,7 +56,7 @@ export function PublicEventGallery() {
   }
 
   const event = eventData.data
-  const mediaItems = mediaData?.data || []
+  const mediaItems = mediaData?.pages.flatMap((page) => page.data) || []
 
   return (
     <div className="min-h-screen bg-background">
@@ -73,42 +91,58 @@ export function PublicEventGallery() {
             <p className="text-sm text-muted-foreground mt-1">Check back later for updates to this event.</p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-            {mediaItems.map((item) => (
-              <div key={item.media_id} className="group relative aspect-square overflow-hidden rounded-md bg-surface border border-border">
-                <img
-                  src={item.thumbnail_url}
-                  alt={item.tags.join(', ') || 'Event media'}
-                  className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                  loading="lazy"
-                />
-                
-                {/* Labels overlay */}
-                <div className="absolute top-2 left-2 flex flex-col gap-1">
-                  {item.quality_label && (
-                    <span className="inline-flex items-center rounded-full bg-black/60 px-2 py-0.5 text-xs font-medium text-white backdrop-blur-sm">
-                      {item.quality_label}
-                    </span>
+          <div>
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+              {mediaItems.map((item) => (
+                <div key={item.media_id} className="group relative aspect-square overflow-hidden rounded-md bg-surface border border-border">
+                  <img
+                    src={resolveApiUrl(item.thumbnail_url)}
+                    alt={item.tags.join(', ') || 'Event media'}
+                    className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                    loading="lazy"
+                  />
+                  
+                  {/* Labels overlay */}
+                  <div className="absolute top-2 left-2 flex flex-col gap-1">
+                    {item.quality_label && (
+                      <span className="inline-flex items-center rounded-full bg-black/60 px-2 py-0.5 text-xs font-medium text-white backdrop-blur-sm">
+                        {item.quality_label}
+                      </span>
+                    )}
+                  </div>
+                  
+                  {/* Tags overlay on hover */}
+                  {item.tags && item.tags.length > 0 && (
+                    <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-3 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
+                      <div className="flex flex-wrap gap-1">
+                        {item.tags.slice(0, 3).map(tag => (
+                          <span key={tag} className="text-[10px] font-medium text-white bg-white/20 rounded-sm px-1.5 py-0.5 backdrop-blur-sm">
+                            {tag}
+                          </span>
+                        ))}
+                        {item.tags.length > 3 && (
+                          <span className="text-[10px] font-medium text-white/80">+{item.tags.length - 3}</span>
+                        )}
+                      </div>
+                    </div>
                   )}
                 </div>
-                
-                {/* Tags overlay on hover */}
-                {item.tags && item.tags.length > 0 && (
-                  <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/80 to-transparent p-3 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
-                    <div className="flex flex-wrap gap-1">
-                      {item.tags.slice(0, 3).map(tag => (
-                        <span key={tag} className="text-[10px] font-medium text-white bg-white/20 rounded-sm px-1.5 py-0.5 backdrop-blur-sm">
-                          {tag}
-                        </span>
-                      ))}
-                      {item.tags.length > 3 && (
-                        <span className="text-[10px] font-medium text-white/80">+{item.tags.length - 3}</span>
-                      )}
-                    </div>
-                  </div>
-                )}
+              ))}
+            </div>
+
+            {hasNextPage && (
+              <div className="mt-8 flex justify-center">
+                <button
+                  type="button"
+                  onClick={() => fetchNextPage()}
+                  disabled={isFetchingNextPage}
+                  className="inline-flex items-center justify-center gap-2 rounded-sm border border-border bg-card px-4 py-2 text-sm font-medium text-foreground hover:bg-surface disabled:opacity-50"
+                >
+                  {isFetchingNextPage && <Loader2 className="size-4 animate-spin" />}
+                  Load more
+                </button>
               </div>
-            ))}
+            )}
           </div>
         )}
       </div>

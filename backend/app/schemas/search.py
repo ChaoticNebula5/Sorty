@@ -23,6 +23,7 @@ class SearchQueryParams(BaseModel):
     q: str = Field(min_length=2, max_length=200)
     limit: int = Field(default=20, ge=1, le=50)
     offset: int = Field(default=0, ge=0)
+    min_score: float = Field(default=0.3, ge=0, le=1)
     include_duplicates: bool = False
     include_blurry: bool = True
     include_pending: bool = False

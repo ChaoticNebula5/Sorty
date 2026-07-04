@@ -2,7 +2,7 @@ import uuid
 from decimal import Decimal
 from types import SimpleNamespace
 
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageFilter
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 
@@ -48,6 +48,26 @@ def test_calculate_blur_score_is_higher_for_edge_rich_image() -> None:
         quality_service.calculate_blur_score(detailed)
         > quality_service.calculate_blur_score(flat)
     )
+
+
+def test_analyze_image_quality_separates_sharp_and_blurred_images(tmp_path) -> None:
+    sharp_path = tmp_path / "sharp.jpg"
+    blurred_path = tmp_path / "blurred.jpg"
+    sharp = Image.new("RGB", (256, 256), "white")
+    draw = ImageDraw.Draw(sharp)
+    for index in range(0, 256, 8):
+        draw.line((index, 0, index, 255), fill="black", width=2)
+        draw.line((0, index, 255, index), fill="black", width=2)
+
+    sharp.save(sharp_path)
+    sharp.filter(ImageFilter.GaussianBlur(radius=6)).save(blurred_path)
+
+    sharp_result = quality_service.analyze_image_quality(sharp_path)
+    blurred_result = quality_service.analyze_image_quality(blurred_path)
+
+    assert sharp_result.blur_score > blurred_result.blur_score
+    assert sharp_result.quality_label == "sharp"
+    assert blurred_result.quality_label == "blurry"
 
 
 def test_analyze_image_quality_reads_dimensions(tmp_path) -> None:

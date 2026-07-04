@@ -55,10 +55,18 @@ export interface PublicMediaItem {
 
 export interface EventMediaSummary {
   event_id: string
-  total_files: number
-  total_size_bytes: number
-  processing_status_counts: Record<string, number>
-  quality_label_counts: Record<string, number>
+  total_media: number
+  processed_media: number
+  needs_review_media: number
+  failed_media: number
+  blurry_media: number
+  possible_duplicate_media: number
+  pending_review_decisions: number
+  approved_review_decisions: number
+  edited_review_decisions: number
+  rejected_review_decisions: number
+  confirmed_duplicate_decisions: number
+  export_ready_review_decisions: number
 }
 
 export interface BatchJob {
@@ -73,6 +81,20 @@ export interface BatchJob {
   started_at: string | null
   completed_at: string | null
   error_message: string | null
+}
+
+export interface BatchUploadResponse {
+  event_id: string
+  job_id: string | null
+  job_status: string | null
+  accepted_count: number
+  rejected_count: number
+  media_ids: string[]
+  rejected_files: Array<{
+    filename: string
+    code: string
+    message: string
+  }>
 }
 
 export interface ReviewQueueItem {

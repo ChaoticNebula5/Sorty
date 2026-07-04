@@ -6,7 +6,14 @@ from types import SimpleNamespace
 from fastapi.testclient import TestClient
 
 from app.api.deps import get_db
-from app.api.routes_export import event_service, export_service, queue_service, storage_factory
+from app.api.routes_export import (
+    create_export_download_token,
+    event_service,
+    export_job_to_read,
+    export_service,
+    queue_service,
+    storage_factory,
+)
 from app.core.config import get_settings
 from app.main import app
 
@@ -123,6 +130,16 @@ def test_create_export_returns_queued_job(monkeypatch) -> None:
     assert body["data"]["download_url"] is None
 
 
+def test_completed_export_read_includes_scoped_download_token() -> None:
+    export_job = make_export_job(status="completed")
+
+    body = export_job_to_read(export_job)
+
+    assert body.download_url is not None
+    assert body.download_url.startswith(f"/api/exports/{export_job.id}/download?token=")
+    assert get_settings().admin_token not in body.download_url
+
+
 def test_create_export_marks_queued_before_enqueue(monkeypatch) -> None:
     event_id = uuid.uuid4()
     export_job = make_export_job(event_id=event_id, status="created")
@@ -222,7 +239,13 @@ def test_download_export_returns_conflict_when_not_ready(monkeypatch) -> None:
 
 def test_download_export_streams_zip(monkeypatch) -> None:
     export_job = make_export_job()
-    storage = SimpleNamespace(get_bytes=lambda object_key: b"zip-bytes")
+    requested_keys: list[str] = []
+
+    def fake_get_bytes(object_key: str) -> bytes:
+        requested_keys.append(object_key)
+        return b"zip-bytes"
+
+    storage = SimpleNamespace(get_bytes=fake_get_bytes)
 
     monkeypatch.setattr(export_service, "get_export_job", lambda db, export_id: export_job)
     monkeypatch.setattr(storage_factory, "get_storage_service", lambda: storage)
@@ -238,4 +261,63 @@ def test_download_export_streams_zip(monkeypatch) -> None:
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/zip"
+    assert response.headers["content-disposition"] == f'attachment; filename="{export_job.id}.zip"'
+    assert response.headers["content-length"] == str(len(b"zip-bytes"))
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["x-content-type-options"] == "nosniff"
     assert response.content == b"zip-bytes"
+    assert requested_keys == [export_job.zip_object_key]
+
+
+def test_download_export_accepts_query_token_for_browser_download(monkeypatch) -> None:
+    export_job = make_export_job()
+    storage = SimpleNamespace(get_bytes=lambda object_key: b"zip-bytes")
+
+    monkeypatch.setattr(export_service, "get_export_job", lambda db, export_id: export_job)
+    monkeypatch.setattr(storage_factory, "get_storage_service", lambda: storage)
+    app.dependency_overrides[get_db] = override_db
+
+    try:
+        response = TestClient(app).get(
+            f"/api/exports/{export_job.id}/download",
+            params={"token": create_export_download_token(export_job.id)},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "application/zip"
+    assert response.content == b"zip-bytes"
+
+
+def test_download_export_rejects_missing_query_token(monkeypatch) -> None:
+    export_job = make_export_job()
+
+    monkeypatch.setattr(export_service, "get_export_job", lambda db, export_id: export_job)
+    app.dependency_overrides[get_db] = override_db
+
+    try:
+        response = TestClient(app).get(f"/api/exports/{export_job.id}/download")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "missing_admin_token"
+
+
+def test_download_export_rejects_invalid_query_token(monkeypatch) -> None:
+    export_job = make_export_job()
+
+    monkeypatch.setattr(export_service, "get_export_job", lambda db, export_id: export_job)
+    app.dependency_overrides[get_db] = override_db
+
+    try:
+        response = TestClient(app).get(
+            f"/api/exports/{export_job.id}/download",
+            params={"token": "wrong"},
+        )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "invalid_admin_token"

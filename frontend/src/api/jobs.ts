@@ -1,18 +1,18 @@
 import { apiClient, parseApiError } from './client'
-import type { APIResponse, BatchJob } from './types'
+import type { APIResponse, BatchJob, BatchUploadResponse } from './types'
 
 export async function uploadMediaBatch(
   eventId: string,
   files: File[],
   onProgress?: (percent: number) => void
-): Promise<APIResponse<BatchJob>> {
+): Promise<APIResponse<BatchUploadResponse>> {
   const formData = new FormData()
   files.forEach((file) => {
     formData.append('files', file)
   })
 
   try {
-    const { data } = await apiClient.post<APIResponse<BatchJob>>(
+    const { data } = await apiClient.post<APIResponse<BatchUploadResponse>>(
       `/events/${eventId}/media/batch-upload`,
       formData,
       {

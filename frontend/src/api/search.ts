@@ -5,6 +5,7 @@ export interface SearchParams {
   q?: string
   limit?: number
   offset?: number
+  min_score?: number
   include_duplicates?: boolean
   include_blurry?: boolean
   include_pending?: boolean

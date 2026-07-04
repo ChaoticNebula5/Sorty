@@ -2,10 +2,11 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getReviewQueue, updateReviewDecision } from '@/api/review'
-import { getEventJobs } from '@/api/events'
+import { getEventJobs, getEventSummary } from '@/api/events'
 import { resumeJob } from '@/api/jobs'
 import { Check, X, Flag, AlertCircle, Loader2, Info, ChevronRight, ChevronLeft, PlayCircle, Undo2 } from 'lucide-react'
 import { StatusChip } from '@/components/ui/StatusChip'
+import { AuthenticatedImage } from '@/components/ui/AuthenticatedImage'
 import type { ReviewQueueItem, ReviewDecisionUpdate } from '@/api/types'
 import { cn } from '@/lib/utils'
 
@@ -17,10 +18,18 @@ export function ReviewQueue() {
   const [activeIndex, setActiveIndex] = useState(0)
   const [showUndo, setShowUndo] = useState(false)
   const stagedRef = useRef<{ item: ReviewQueueItem, payload: ReviewDecisionUpdate } | null>(null)
+  const pendingReviewSavesRef = useRef<Set<Promise<unknown>>>(new Set())
+  const [pendingReviewSaveCount, setPendingReviewSaveCount] = useState(0)
   
   const { data: queueData, isLoading: isQueueLoading, isError: isQueueError } = useQuery({
     queryKey: ['review-queue', eventId],
     queryFn: () => getReviewQueue(eventId!),
+    enabled: !!eventId,
+  })
+
+  const { data: summaryData, isLoading: isSummaryLoading } = useQuery({
+    queryKey: ['event-summary', eventId],
+    queryFn: () => getEventSummary(eventId!),
     enabled: !!eventId,
   })
 
@@ -31,10 +40,12 @@ export function ReviewQueue() {
   })
 
   const queue = queueData?.data || []
+  const jobs = jobsData?.data || []
   const activeItem = queue[activeIndex] || null
 
-  // Find a job waiting for review
-  const waitingJob = jobsData?.data?.find(j => j.status === 'waiting_for_review')
+  const latestJob = jobs[0] || null
+  const reviewPausedJob = jobs.find(j => ['waiting_for_review', 'reviewed'].includes(j.status))
+  const totalMedia = summaryData?.data?.total_media ?? Math.max(0, ...jobs.map((job) => job.total_files))
 
   // Keep active index in bounds
   useEffect(() => {
@@ -43,34 +54,46 @@ export function ReviewQueue() {
     }
   }, [queue.length, activeIndex])
 
-  // Fire-and-forget commit on unmount
+  const saveReviewDecision = useCallback((staged: { item: ReviewQueueItem, payload: ReviewDecisionUpdate }) => {
+    const request = updateReviewDecision({
+      mediaId: staged.item.media_id,
+      payload: staged.payload,
+    })
+    const tracked = request.finally(() => {
+      pendingReviewSavesRef.current.delete(tracked)
+      setPendingReviewSaveCount(pendingReviewSavesRef.current.size)
+    })
+    pendingReviewSavesRef.current.add(tracked)
+    setPendingReviewSaveCount(pendingReviewSavesRef.current.size)
+    return tracked
+  }, [])
+
   useEffect(() => {
     return () => {
       if (stagedRef.current) {
-        updateReviewDecision({
-          mediaId: stagedRef.current.item.media_id,
-          payload: stagedRef.current.payload
-        }).catch(console.error)
+        saveReviewDecision(stagedRef.current).catch(console.error)
       }
     }
-  }, [])
+  }, [saveReviewDecision])
 
-  const decisionMutation = useMutation({
-    mutationFn: (params: { mediaId: string, payload: ReviewDecisionUpdate }) => updateReviewDecision(params),
-    onSuccess: () => {
-      // Optimistic update handles UI, no need to invalidate immediately
-    }
-  })
+  const commitStagedDecision = useCallback(async () => {
+    if (!stagedRef.current) return
+
+    const staged = stagedRef.current
+    stagedRef.current = null
+    setShowUndo(false)
+    await saveReviewDecision(staged)
+    await Promise.all(Array.from(pendingReviewSavesRef.current))
+    await queryClient.invalidateQueries({ queryKey: ['review-queue', eventId] })
+    await refetchJobs()
+  }, [eventId, queryClient, refetchJobs, saveReviewDecision])
 
   const handleDecision = useCallback((status: 'approved' | 'rejected' | 'duplicate') => {
     if (!activeItem) return
 
     // Commit previous staged decision
     if (stagedRef.current) {
-      decisionMutation.mutate({
-        mediaId: stagedRef.current.item.media_id,
-        payload: stagedRef.current.payload
-      })
+      saveReviewDecision(stagedRef.current).catch(console.error)
     }
 
     // Stage current decision
@@ -78,8 +101,9 @@ export function ReviewQueue() {
       item: activeItem,
       payload: {
         status,
-        final_tags: activeItem.tags || [],
+        final_tags: status === 'approved' ? (activeItem.tags || []) : [],
         final_primary_folder: status === 'approved' ? (activeItem.suggested_primary_folder || 'Approved') : undefined,
+        include_in_export: status === 'approved' ? true : false,
       }
     }
     
@@ -93,7 +117,7 @@ export function ReviewQueue() {
         data: oldData.data.filter((item: ReviewQueueItem) => item.media_id !== activeItem.media_id)
       }
     })
-  }, [activeItem, decisionMutation, eventId, queryClient])
+  }, [activeItem, eventId, queryClient, saveReviewDecision])
 
   const handleUndo = useCallback(() => {
     if (stagedRef.current) {
@@ -111,13 +135,17 @@ export function ReviewQueue() {
   }, [activeIndex, eventId, queryClient])
 
   const resumeMutation = useMutation({
-    mutationFn: (jobId: string) => resumeJob(jobId),
+    mutationFn: async (jobId: string) => {
+      await commitStagedDecision()
+      return resumeJob(jobId)
+    },
     onSuccess: () => {
       refetchJobs()
       navigate(`/events/${eventId}`)
     }
   })
 
+  const isReviewActionDisabled = resumeMutation.isPending || pendingReviewSaveCount > 0
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -128,7 +156,7 @@ export function ReviewQueue() {
         return
       }
 
-      if (!activeItem || decisionMutation.isPending) return
+      if (!activeItem || isReviewActionDisabled) return
       
       if (e.key === 'ArrowRight') {
         setActiveIndex(prev => Math.min(prev + 1, queue.length - 1))
@@ -144,9 +172,9 @@ export function ReviewQueue() {
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [activeItem, queue.length, decisionMutation.isPending, handleDecision, handleUndo])
+  }, [activeItem, queue.length, isReviewActionDisabled, handleDecision, handleUndo])
 
-  if (isQueueLoading) {
+  if (isQueueLoading || isSummaryLoading) {
     return (
       <div className="flex h-full items-center justify-center">
         <Loader2 className="size-6 animate-spin text-primary" />
@@ -168,36 +196,84 @@ export function ReviewQueue() {
   }
 
   if (queue.length === 0) {
+    const emptyState = (() => {
+      if (totalMedia === 0 && !reviewPausedJob) {
+        return {
+          title: 'No media uploaded yet',
+          copy: 'Upload media from Event Detail to start processing and review.',
+          icon: Info,
+        }
+      }
+
+      if (reviewPausedJob?.status === 'waiting_for_review') {
+        return {
+          title: 'No review items found',
+          copy: 'The job is waiting for review, but there are no items currently in the review queue.',
+          icon: AlertCircle,
+        }
+      }
+
+      if (reviewPausedJob?.status === 'reviewed') {
+        return {
+          title: 'Review decisions saved',
+          copy: 'There are no more items needing review. Resume processing to finish the job.',
+          icon: Check,
+        }
+      }
+
+      if (latestJob?.status === 'completed') {
+        return {
+          title: 'No review needed',
+          copy: 'Processing is complete and there are no items waiting for review.',
+          icon: Check,
+        }
+      }
+
+      return {
+        title: 'No review items',
+        copy: 'There are no items waiting for review in this event.',
+        icon: Info,
+      }
+    })()
+    const EmptyIcon = emptyState.icon
+
     return (
       <div className="flex h-full flex-col items-center justify-center gap-4 text-center">
         <div className="flex size-16 items-center justify-center rounded-full bg-surface text-muted-foreground">
-          <Check className="size-8" />
+          <EmptyIcon className="size-8" />
         </div>
         <div>
-          <h2 className="text-xl font-semibold text-foreground">Review Complete</h2>
+          <h2 className="text-xl font-semibold text-foreground">{emptyState.title}</h2>
           <p className="mt-1 text-sm text-muted-foreground">
-            There are no more items needing review in this event.
+            {emptyState.copy}
           </p>
         </div>
         
-        {waitingJob && (
+        {reviewPausedJob && (
           <div className="mt-6 rounded-md border border-border bg-card p-6 shadow-sm">
             <h3 className="font-medium text-foreground">Ready to resume pipeline?</h3>
             <p className="mt-1 text-sm text-muted-foreground mb-4">
-              Job {waitingJob.id.substring(0, 8)} is paused waiting for your review.
+              {reviewPausedJob.status === 'reviewed'
+                ? `Job ${reviewPausedJob.id.substring(0, 8)} has review decisions saved and is ready to resume.`
+                : `Job ${reviewPausedJob.id.substring(0, 8)} is paused waiting for your review.`}
             </p>
             <button
-              onClick={() => resumeMutation.mutate(waitingJob.id)}
-              disabled={resumeMutation.isPending}
+              onClick={() => resumeMutation.mutate(reviewPausedJob.id)}
+              disabled={resumeMutation.isPending || pendingReviewSaveCount > 0}
               className="flex w-full items-center justify-center gap-2 rounded-sm bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-opacity hover:opacity-90 disabled:opacity-50"
             >
               {resumeMutation.isPending ? <Loader2 className="size-4 animate-spin" /> : <PlayCircle className="size-4" />}
-              Resume Processing
+              {resumeMutation.isPending ? 'Resuming...' : 'Resume Processing'}
             </button>
+            {resumeMutation.isError && (
+              <p className="mt-3 text-sm text-danger">
+                Resume failed. Refresh the queue and make sure all review decisions are saved.
+              </p>
+            )}
           </div>
         )}
 
-        {!waitingJob && (
+        {!reviewPausedJob && (
           <button
             onClick={() => navigate(`/events/${eventId}`)}
             className="mt-2 text-sm text-primary hover:underline"
@@ -244,8 +320,8 @@ export function ReviewQueue() {
                 idx === activeIndex ? "border-primary" : "border-transparent hover:border-border"
               )}
             >
-              <img
-                src={item.thumbnail_url.startsWith('http') ? item.thumbnail_url : `${import.meta.env.VITE_API_BASE_URL || '/api'}${item.thumbnail_url}`}
+              <AuthenticatedImage
+                src={item.thumbnail_url}
                 alt="thumbnail"
                 className="h-full w-full object-cover"
                 loading="lazy"
@@ -263,8 +339,8 @@ export function ReviewQueue() {
         <div className="flex min-w-0 flex-1 flex-col bg-background">
           <div className="relative flex min-h-0 flex-1 items-center justify-center p-4">
             {activeItem && (
-              <img
-                src={activeItem.thumbnail_url.startsWith('http') ? activeItem.thumbnail_url : `${import.meta.env.VITE_API_BASE_URL || '/api'}${activeItem.thumbnail_url}`}
+              <AuthenticatedImage
+                src={activeItem.thumbnail_url}
                 alt="preview"
                 className="max-h-full max-w-full rounded-md object-contain shadow-lg"
               />
@@ -290,7 +366,7 @@ export function ReviewQueue() {
           <div className="flex shrink-0 items-center justify-center gap-4 border-t border-border bg-card p-4">
             <button
               onClick={() => handleDecision('rejected')}
-              disabled={decisionMutation.isPending}
+              disabled={isReviewActionDisabled}
               className="group flex flex-col items-center gap-1 text-muted-foreground hover:text-danger disabled:opacity-50"
             >
               <div className="flex size-12 items-center justify-center rounded-full border border-border bg-surface transition-colors group-hover:border-danger/50 group-hover:bg-danger/10">
@@ -301,22 +377,18 @@ export function ReviewQueue() {
 
             <button
               onClick={() => handleDecision('approved')}
-              disabled={decisionMutation.isPending}
+              disabled={isReviewActionDisabled}
               className="group flex flex-col items-center gap-1 text-muted-foreground hover:text-ok disabled:opacity-50"
             >
               <div className="flex size-14 items-center justify-center rounded-full border border-border bg-surface transition-colors group-hover:border-ok/50 group-hover:bg-ok/10">
-                {decisionMutation.isPending && decisionMutation.variables?.payload.status === 'approved' ? (
-                  <Loader2 className="size-6 animate-spin text-ok" />
-                ) : (
-                  <Check className="size-6" />
-                )}
+                <Check className="size-6" />
               </div>
               <span className="mono-label font-bold text-foreground">Approve (A)</span>
             </button>
 
             <button
               onClick={() => handleDecision('duplicate')}
-              disabled={decisionMutation.isPending}
+              disabled={isReviewActionDisabled}
               className="group flex flex-col items-center gap-1 text-muted-foreground hover:text-warn disabled:opacity-50"
             >
               <div className="flex size-12 items-center justify-center rounded-full border border-border bg-surface transition-colors group-hover:border-warn/50 group-hover:bg-warn/10">
