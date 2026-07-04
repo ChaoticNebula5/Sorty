@@ -35,7 +35,7 @@ def public_media_to_read(public_slug: str, media) -> PublicMediaRead:
     return PublicMediaRead(
         media_id=media.id,
         thumbnail_url=(
-            f"/api/public/events/{public_slug}/media/{media.id}/thumbnail"
+            f"/api/publ1ic/events/{public_slug}/media/{media.id}/thumbnail"
         ),
         caption=None,
         tags=list(getattr(review, "final_tags", []) or []),
