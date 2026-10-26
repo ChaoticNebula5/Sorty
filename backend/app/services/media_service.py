@@ -157,10 +157,26 @@ def mark_batch_media_failed(
         db.scalars(select(MediaAsset).where(MediaAsset.batch_job_id == batch_job_id))
     )
     for media in media_assets:
+        if not should_retry_media(media):
+            continue
         media.processing_status = "failed"
         media.processing_error = error_message
 
     db.commit()
+
+
+def should_retry_media(media) -> bool:
+    state = getattr(media, "processing_status", None)
+    if state in {"processed", "excluded"}:
+        return False
+    if state == "needs_review":
+        review = getattr(media, "review_decision", None)
+        return (
+            getattr(review, "status", None) == "pending"
+            and "vision_analysis_failed" in (getattr(review, "review_reasons", None) or [])
+            and getattr(media, "ai_analysis", None) is None
+        )
+    return True
 
 
 def list_event_media(

@@ -41,7 +41,12 @@ class Settings(BaseSettings):
 
     vision_provider: Literal["mock", "gemini", "ollama"] = "mock"
     gemini_api_key: str = ""
-    gemini_vision_model: str = "gemini-2.0-flash"
+    gemini_vision_model: str = "gemini-3.5-flash-lite"
+    gemini_max_attempts: int = Field(default=4, ge=1, le=10)
+    gemini_retry_base_seconds: float = Field(default=2, gt=0, le=60)
+    gemini_retry_max_seconds: float = Field(default=30, gt=0, le=300)
+    gemini_retry_wait_budget_seconds: float = Field(default=120, ge=0, le=600)
+    processing_job_timeout_seconds: int = Field(default=7200, ge=600)
     ollama_base_url: str = "http://host.docker.internal:11434"
     ollama_vision_model: str = "llava"
 

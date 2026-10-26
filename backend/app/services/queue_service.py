@@ -43,6 +43,7 @@ def enqueue_batch_processing(
     job_id: uuid.UUID,
     event_id: uuid.UUID,
     media_ids: list[uuid.UUID],
+    rq_job_id: str | None = None,
 ) -> str:
     settings = get_settings()
     connection = redis.from_url(settings.redis_url)
@@ -53,7 +54,11 @@ def enqueue_batch_processing(
         "media_ids": [str(media_id) for media_id in media_ids],
         "mode": "start",
     }
-    rq_job = queue.enqueue(process_batch_job, payload)
+    timeout = max(
+        settings.processing_job_timeout_seconds,
+        len(media_ids) * (120 * settings.gemini_max_attempts + settings.gemini_retry_wait_budget_seconds + 60) + 60,
+    )
+    rq_job = queue.enqueue(process_batch_job, payload, job_id=rq_job_id, job_timeout=timeout)
     return rq_job.id
 
 

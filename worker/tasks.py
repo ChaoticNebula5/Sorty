@@ -1,9 +1,12 @@
+import logging
 import uuid
 from pathlib import Path
 from typing import Any
 
 from app.agents.mediaops_graph import resume_reviewed_batch, run_mediaops_batch
 from app.db.session import SessionLocal
+from app.schemas.ai import ImageAnalysisResult
+from app.services.vision_retry import VisionRetryExhausted
 from app.services import (
     analysis_service,
     event_service,
@@ -16,6 +19,8 @@ from app.services import (
     storage_factory,
     vision_service,
 )
+
+logger = logging.getLogger(__name__)
 
 
 class WorkflowCheckpointError(RuntimeError):
@@ -57,8 +62,19 @@ def process_batch_job(payload: dict[str, Any]) -> str:
             processed_files = 0
             failed_files = 0
             needs_review_count = 0
+            batch_stop_reason = None
 
             for media in media_items:
+                if not media_service.should_retry_media(media):
+                    if getattr(getattr(media, "review_decision", None), "status", None) == "pending":
+                        needs_review_count += 1
+                    else:
+                        processed_files += 1
+                    continue
+                if batch_stop_reason:
+                    media_service.mark_media_failed(db, media, batch_stop_reason)
+                    failed_files += 1
+                    continue
                 temp_path: Path | None = None
                 try:
                     media_service.mark_media_processing(db, media)
@@ -80,27 +96,45 @@ def process_batch_job(payload: dict[str, Any]) -> str:
                         quality_signal=quality_signal,
                         commit=False,
                     )
+                    # Do not hold quality/duplicate row locks while backing off.
+                    db.commit()
 
                     result = None
                     vision_error: Exception | None = None
                     try:
-                        result = provider.analyze_image(
-                            str(temp_path),
-                            event_context=event_context,
-                        )
+                        saved = getattr(getattr(media, "ai_analysis", None), "raw_response", None)
+                        if saved:
+                            result = ImageAnalysisResult.model_validate(saved)
+                        else:
+                            result = provider.analyze_image(
+                                str(temp_path),
+                                event_context=event_context,
+                            )
+                    except VisionRetryExhausted:
+                        raise
                     except Exception as exc:
                         vision_error = exc
-                    else:
-                        analysis = analysis_service.upsert_ai_analysis(
-                            db,
-                            media_id=media.id,
-                            result=result,
-                            model_provider=provider.provider_name,
-                            model_name=provider.model_name,
-                            raw_response=result.model_dump(),
-                            commit=False,
+                        logger.warning(
+                            "Vision analysis failed for media %s: provider=%s error_type=%s status_code=%s",
+                            media.id,
+                            provider.provider_name,
+                            type(exc).__name__,
+                            getattr(exc, "code", None),
                         )
-                        media.ai_analysis = analysis
+                    else:
+                        if not saved:
+                            analysis = analysis_service.upsert_ai_analysis(
+                                db,
+                                media_id=media.id,
+                                result=result,
+                                model_provider=provider.provider_name,
+                                model_name=provider.model_name,
+                                raw_response=result.model_dump(),
+                                commit=False,
+                            )
+                            media.ai_analysis = analysis
+                        # Persist paid inference before optional indexing can fail.
+                        db.commit()
 
                     review_reasons = list(result.review_reasons or []) if result is not None else []
                     if vision_error is not None:
@@ -158,6 +192,11 @@ def process_batch_job(payload: dict[str, Any]) -> str:
                         needs_review_count += 1
                     else:
                         processed_files += 1
+                except VisionRetryExhausted as media_exc:
+                    db.rollback()
+                    batch_stop_reason = str(media_exc)
+                    failed_files += 1
+                    media_service.mark_media_failed(db, media, batch_stop_reason)
                 except Exception as media_exc:
                     db.rollback()
                     failed_files += 1
@@ -176,6 +215,10 @@ def process_batch_job(payload: dict[str, Any]) -> str:
                 failed_files=failed_files,
                 needs_review_count=needs_review_count,
             ) or job
+            if batch_stop_reason:
+                finished_job.error_message = batch_stop_reason
+                db.commit()
+                return str(job_id)
             try:
                 run_mediaops_batch(
                     thread_id=finished_job.langgraph_thread_id,

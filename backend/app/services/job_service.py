@@ -68,6 +68,29 @@ def claim_job_for_resume(
     return job
 
 
+def claim_job_for_retry(db: Session, job_id: uuid.UUID, rq_job_id: str) -> BatchJob:
+    result = db.execute(
+        update(BatchJob)
+        .where(BatchJob.id == job_id, BatchJob.status.in_(
+            ("failed", "partial_failed", "waiting_for_review", "reviewed", "completed")
+        ))
+        .values(status="queued", current_rq_job_id=rq_job_id, error_message=None, completed_at=None)
+        .returning(BatchJob.id)
+    )
+    if result.scalar_one_or_none() is None:
+        db.rollback()
+        raise ValueError("This batch is already queued or processing.")
+    db.commit()
+    return get_batch_job(db, job_id)
+
+
+def mark_job_retry_enqueue_failed(db: Session, job: BatchJob, previous_status: str) -> None:
+    job.status = previous_status
+    job.current_rq_job_id = None
+    job.error_message = "Could not enqueue retry. Please try again."
+    db.commit()
+
+
 def mark_job_resume_completed(db: Session, job: BatchJob) -> BatchJob:
     job.status = "completed"
     job.current_rq_job_id = None

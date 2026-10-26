@@ -1,4 +1,5 @@
 import uuid
+import pytest
 from collections.abc import Generator
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -9,6 +10,7 @@ from app.api.deps import get_db
 from app.api.routes_jobs import job_service, queue_service, review_service
 from app.core.config import get_settings
 from app.main import app
+from app.services import media_service
 
 
 def override_db() -> Generator[object, None, None]:
@@ -17,6 +19,83 @@ def override_db() -> Generator[object, None, None]:
 
 def auth_headers() -> dict[str, str]:
     return {"Authorization": f"Bearer {get_settings().admin_token}"}
+
+
+def call_retry(job_id, *, authenticated=True):
+    app.dependency_overrides[get_db] = override_db
+    try:
+        return TestClient(app).post(f"/api/jobs/{job_id}/retry", headers=auth_headers() if authenticated else {})
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_retry_requires_admin():
+    assert call_retry(uuid.uuid4(), authenticated=False).status_code == 401
+
+
+def test_review_resume_cannot_bypass_failed_processing(monkeypatch):
+    job = make_job(status="waiting_for_review", failed_files=2)
+    monkeypatch.setattr(job_service, "get_batch_job", lambda *args: job)
+    app.dependency_overrides[get_db] = override_db
+    try:
+        response = TestClient(app).post(f"/api/jobs/{job.id}/resume", headers=auth_headers())
+    finally:
+        app.dependency_overrides.clear()
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "processing_incomplete"
+
+
+@pytest.mark.parametrize("status", ["queued", "processing"])
+def test_retry_rejects_in_flight_batches(monkeypatch, status):
+    job = make_job(status=status)
+    monkeypatch.setattr(job_service, "get_batch_job", lambda *args: job)
+    assert call_retry(job.id).status_code == 409
+
+
+def test_retry_missing_job(monkeypatch):
+    monkeypatch.setattr(job_service, "get_batch_job", lambda *args: None)
+    assert call_retry(uuid.uuid4()).status_code == 404
+
+
+def test_retry_only_enqueues_failed_images_and_rejects_double_click(monkeypatch):
+    job = make_job(status="partial_failed")
+    good = SimpleNamespace(id=uuid.uuid4(), processing_status="processed")
+    bad = SimpleNamespace(id=uuid.uuid4(), processing_status="failed")
+    enqueued = []
+    monkeypatch.setattr(job_service, "get_batch_job", lambda *args: job)
+    monkeypatch.setattr(media_service, "list_batch_media", lambda *args: [good, bad])
+    def claim(db, job_id, rq_job_id):
+        job.status = "queued"
+        job.current_rq_job_id = rq_job_id
+        return job
+    monkeypatch.setattr(job_service, "claim_job_for_retry", claim)
+    monkeypatch.setattr(queue_service, "enqueue_batch_processing", lambda **kwargs: enqueued.append(kwargs))
+    assert call_retry(job.id).status_code == 200
+    assert enqueued[0]["media_ids"] == [bad.id]
+    assert call_retry(job.id).status_code == 409
+    assert len(enqueued) == 1
+
+
+def test_retry_refuses_completed_quality_review(monkeypatch):
+    job = make_job(status="waiting_for_review")
+    media = SimpleNamespace(processing_status="needs_review", review_decision=SimpleNamespace(status="pending", review_reasons=["low_quality_blur"]))
+    monkeypatch.setattr(job_service, "get_batch_job", lambda *args: job)
+    monkeypatch.setattr(media_service, "list_batch_media", lambda *args: [media])
+    response = call_retry(job.id)
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "no_retryable_media"
+
+
+def test_retry_recovers_from_queue_outage(monkeypatch):
+    job = make_job(status="partial_failed")
+    restored = []
+    monkeypatch.setattr(job_service, "get_batch_job", lambda *args: job)
+    monkeypatch.setattr(media_service, "list_batch_media", lambda *args: [SimpleNamespace(id=uuid.uuid4(), processing_status="failed")])
+    monkeypatch.setattr(job_service, "claim_job_for_retry", lambda *args: job)
+    monkeypatch.setattr(queue_service, "enqueue_batch_processing", lambda **kwargs: (_ for _ in ()).throw(ConnectionError()))
+    monkeypatch.setattr(job_service, "mark_job_retry_enqueue_failed", lambda db, job, state: restored.append(state))
+    assert call_retry(job.id).status_code == 503
+    assert restored == ["partial_failed"]
 
 
 def make_job(**overrides: object) -> SimpleNamespace:

@@ -15,10 +15,11 @@ class FakeQueue:
     def fetch_job(self, job_id: str):
         return self.existing_job
 
-    def enqueue(self, func, payload, job_id=None):
+    def enqueue(self, func, payload, job_id=None, **kwargs):
         self.func = func
         self.payload = payload
         self.job_id = job_id
+        self.options = kwargs
         return SimpleNamespace(id=job_id or "generated-job-id")
 
 
@@ -163,3 +164,13 @@ def test_enqueue_export_sends_export_payload(monkeypatch) -> None:
         "export_id": str(export_id),
         "mode": "export",
     }
+
+
+def test_processing_timeout_covers_retry_budget_for_large_batches(monkeypatch):
+    queue = FakeQueue("test", object())
+    monkeypatch.setattr(queue_service.redis, "from_url", lambda url: object())
+    monkeypatch.setattr(queue_service, "Queue", lambda *args, **kwargs: queue)
+    ids = [uuid.uuid4() for _ in range(30)]
+    queue_service.enqueue_batch_processing(uuid.uuid4(), uuid.uuid4(), ids, rq_job_id="retry-claim")
+    assert queue.job_id == "retry-claim"
+    assert queue.options["job_timeout"] >= 30 * (120 * 4 + 120 + 60)

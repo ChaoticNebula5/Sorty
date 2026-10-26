@@ -6,6 +6,21 @@ export async function getEvents(): Promise<APIListResponse<EventItem>> {
   return data
 }
 
+export function isEventsListResponse(value: unknown): value is APIListResponse<EventItem> {
+  if (!value || typeof value !== 'object') {
+    return false
+  }
+
+  const candidate = value as Partial<APIListResponse<EventItem>>
+  return (
+    Array.isArray(candidate.data) &&
+    !!candidate.pagination &&
+    typeof candidate.pagination.limit === 'number' &&
+    typeof candidate.pagination.offset === 'number' &&
+    typeof candidate.pagination.total === 'number'
+  )
+}
+
 export async function createEvent(payload: { name: string; event_type: string; description?: string }): Promise<APIResponse<EventItem>> {
   const { data } = await apiClient.post<APIResponse<EventItem>>('/events', payload)
   return data

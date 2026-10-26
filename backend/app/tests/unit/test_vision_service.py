@@ -51,19 +51,26 @@ def test_gemini_vision_provider_parses_response(monkeypatch, tmp_path) -> None:
         "review_reasons": [],
     }
 
-    class FakeModel:
-        def __init__(self, model_name: str) -> None:
-            self.model_name = model_name
+    captured = {}
 
-        def generate_content(self, inputs):
+    class FakeModels:
+        def generate_content(self, *, model, contents, config):
+            captured.update(model=model, contents=contents, config=config)
             return SimpleNamespace(text=json.dumps(payload))
 
-    class FakeGenAi:
-        def configure(self, api_key: str) -> None:
-            self.api_key = api_key
+    class FakeClient:
+        def __init__(self, *, api_key, http_options):
+            captured.update(api_key=api_key, http_options=http_options)
+            self.models = FakeModels()
 
-        def GenerativeModel(self, model_name: str):
-            return FakeModel(model_name)
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            captured["closed"] = True
+
+    class FakeGenAi:
+        Client = FakeClient
 
     monkeypatch.setattr(vision_service, "_load_gemini_sdk", lambda: FakeGenAi())
     monkeypatch.setattr(
@@ -98,6 +105,11 @@ def test_gemini_vision_provider_parses_response(monkeypatch, tmp_path) -> None:
     assert result.folder_suggestion.reason == "Test response."
     assert result.needs_review is False
     assert result.review_reasons == []
+    assert captured["api_key"] == "test-key"
+    assert captured["model"] == "gemini-test"
+    assert captured["config"]["response_schema"] is ImageAnalysisResult
+    assert captured["config"]["response_mime_type"] == "application/json"
+    assert captured["closed"] is True
 
 
 def test_ollama_vision_provider_posts_image_and_parses_response(monkeypatch, tmp_path) -> None:

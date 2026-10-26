@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Lock, ArrowRight, ShieldAlert, KeyRound, Loader2 } from 'lucide-react'
 import { setAdminToken, clearAdminToken } from '@/lib/auth'
-import { getEvents } from '@/api/events'
+import { getEvents, isEventsListResponse } from '@/api/events'
 import { parseApiError } from '@/api/client'
 
 interface AdminUnlockProps {
@@ -27,13 +27,16 @@ export function AdminUnlock({ onUnlock }: AdminUnlockProps) {
 
     try {
       // Validate by calling a lightweight private endpoint
-      await getEvents()
+      const response = await getEvents()
+      if (!isEventsListResponse(response)) {
+        throw new Error('Backend did not return a valid admin API response.')
+      }
       // If we succeed, the token is valid
       onUnlock()
     } catch (err: unknown) {
+      clearAdminToken()
       const apiError = parseApiError(err)
       if (apiError.status === 401) {
-        clearAdminToken()
         setError('Invalid admin token. Please try again.')
       } else {
         setError(

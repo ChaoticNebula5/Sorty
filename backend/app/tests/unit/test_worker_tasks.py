@@ -60,6 +60,73 @@ class FakeVisionProvider:
         )
 
 
+def setup_retry_batch(monkeypatch, tmp_path, media_items, provider):
+    db = FakeSession()
+    job = SimpleNamespace(id=uuid.uuid4(), event_id=uuid.uuid4(), langgraph_thread_id="retry-thread", total_files=len(media_items))
+    graphs = []
+    monkeypatch.setattr(tasks, "SessionLocal", lambda: db)
+    monkeypatch.setattr(tasks.job_service, "get_batch_job", lambda *args: job)
+    monkeypatch.setattr(tasks.job_service, "mark_job_processing", lambda *args: None)
+    monkeypatch.setattr(tasks.event_service, "get_event", lambda *args: None)
+    monkeypatch.setattr(tasks.storage_factory, "get_storage_service", lambda: FakeStorage(tmp_path / "retry.jpg"))
+    monkeypatch.setattr(tasks.vision_service, "get_vision_provider", lambda: provider)
+    monkeypatch.setattr(tasks.media_service, "list_batch_media", lambda *args, **kwargs: media_items)
+    monkeypatch.setattr(tasks.media_service, "mark_media_processing", lambda db, media: setattr(media, "processing_status", "processing"))
+    monkeypatch.setattr(tasks.media_service, "mark_media_failed", lambda db, media, reason: setattr(media, "processing_status", "failed"))
+    monkeypatch.setattr(tasks.media_service, "mark_media_processed", lambda db, media, commit=True: setattr(media, "processing_status", "processed"))
+    monkeypatch.setattr(tasks.analysis_service, "upsert_ai_analysis", lambda *args, **kwargs: SimpleNamespace(raw_response=kwargs["raw_response"]))
+    monkeypatch.setattr(tasks.search_service, "upsert_media_embedding", lambda *args, **kwargs: None)
+    def finish(db, job, **counts):
+        for key, value in counts.items():
+            setattr(job, key, value)
+        job.status = "partial_failed" if counts["failed_files"] else "completed"
+        return job
+    monkeypatch.setattr(tasks.job_service, "mark_job_finished", finish)
+    monkeypatch.setattr(tasks, "run_mediaops_batch", lambda **kwargs: graphs.append(kwargs))
+    return job, graphs
+
+
+def test_quota_stops_remaining_requests_and_retry_preserves_three_successes(monkeypatch, tmp_path):
+    from app.services.vision_retry import VisionQuotaExhausted
+    items = [SimpleNamespace(id=uuid.uuid4(), event_id=uuid.uuid4(), original_object_key=f"image-{i}",
+                             processing_status="processed" if i < 3 else "queued") for i in range(8)]
+    class Provider(FakeVisionProvider):
+        calls = 0
+        exhausted = True
+        def analyze_image(self, *args, **kwargs):
+            self.calls += 1
+            if self.exhausted:
+                raise VisionQuotaExhausted("Daily quota exhausted")
+            return super().analyze_image(*args, **kwargs)
+    provider = Provider()
+    job, graphs = setup_retry_batch(monkeypatch, tmp_path, items, provider)
+    tasks.process_batch_job({"job_id": str(job.id)})
+    assert provider.calls == 1
+    assert [m.processing_status for m in items] == ["processed"] * 3 + ["failed"] * 5
+    assert (job.processed_files, job.failed_files) == (3, 5)
+    assert graphs == []
+    provider.exhausted = False
+    tasks.process_batch_job({"job_id": str(job.id)})
+    assert provider.calls == 6  # one failed request, then exactly the five unfinished photos
+    assert all(m.processing_status == "processed" for m in items)
+    assert (job.processed_files, job.failed_files, job.status) == (8, 0, "completed")
+    assert len(graphs) == 1
+
+
+def test_retry_reuses_persisted_paid_analysis_after_indexing_failure(monkeypatch, tmp_path):
+    result = FakeVisionProvider().analyze_image("unused", {})
+    media = SimpleNamespace(id=uuid.uuid4(), event_id=uuid.uuid4(), original_object_key="photo",
+                            processing_status="failed", ai_analysis=SimpleNamespace(raw_response=result.model_dump()))
+    class NeverCallProvider(FakeVisionProvider):
+        def analyze_image(self, *args, **kwargs):
+            raise AssertionError("Already-saved inference must not be repeated")
+    job, _ = setup_retry_batch(monkeypatch, tmp_path, [media], NeverCallProvider())
+    monkeypatch.setattr(tasks.analysis_service, "upsert_ai_analysis", lambda *args, **kwargs: pytest.fail("Must preserve original model metadata"))
+    tasks.process_batch_job({"job_id": str(job.id)})
+    assert media.processing_status == "processed"
+    assert job.processed_files == 1
+
+
 @pytest.fixture(autouse=True)
 def fake_quality_service(monkeypatch) -> None:
     quality_result = SimpleNamespace(

@@ -36,6 +36,11 @@ export async function getJobStatus(jobId: string): Promise<APIResponse<BatchJob>
   return data
 }
 
+export async function retryJob(jobId: string): Promise<APIResponse<{ job_id: string; status: string }>> {
+  const { data } = await apiClient.post<APIResponse<{ job_id: string; status: string }>>(`/jobs/${jobId}/retry`)
+  return data
+}
+
 export async function resumeJob(jobId: string) {
   const { data } = await apiClient.post<APIResponse<any>>(`/jobs/${jobId}/resume`)
   return data

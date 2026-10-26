@@ -7,6 +7,11 @@ __pycache__/
 *.pyc
 .tmp/
 
+# Local codebase notes and testing reports
+/REAL_TESTING.md
+/CODEBASE_TEST_GUIDE.md
+/frontend/.verification-dist/
+
 sorty_ai_coding_bundle.zip
 Sorty_AI_FULL_BUILD_CONTEXT_PACK.md
 /docs

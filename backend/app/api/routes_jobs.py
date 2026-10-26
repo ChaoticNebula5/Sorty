@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import get_db, require_admin_auth
 from app.schemas.common import APIResponse
 from app.schemas.jobs import BatchJobRead, JobResumeResponse
-from app.services import job_service, queue_service, review_service
+from app.services import job_service, media_service, queue_service, review_service
 
 router = APIRouter(
     prefix="/api/jobs",
@@ -67,6 +67,12 @@ def resume_job(
                 "details": {"job_id": str(job_id), "status": job.status},
             },
         )
+
+    if job.failed_files:
+        raise HTTPException(409, detail={
+            "code": "processing_incomplete",
+            "message": "Retry failed images before resuming the review workflow.",
+        })
 
     pending_count = review_service.count_pending_reviews_for_batch(db, job.id)
     if pending_count:
@@ -139,3 +145,33 @@ def resume_job(
         ),
         error=None,
     )
+
+
+@router.post("/{job_id}/retry")
+def retry_job(job_id: uuid.UUID, db: Session = Depends(get_db)) -> APIResponse:
+    job = job_service.get_batch_job(db, job_id)
+    if job is None:
+        raise HTTPException(404, detail={"code": "job_not_found", "message": "Job not found."})
+    if job.status in {"queued", "processing", "created", "exporting"}:
+        raise HTTPException(409, detail={"code": "invalid_job_status", "message": "Wait for this batch to stop before retrying."})
+    candidates = [m for m in media_service.list_batch_media(db, job.id) if media_service.should_retry_media(m)]
+    if not candidates:
+        raise HTTPException(409, detail={"code": "no_retryable_media", "message": "No failed or unfinished images to retry."})
+    previous_status = job.status
+    rq_job_id = f"retry-{job.id}-{uuid.uuid4()}"
+    try:
+        claimed = job_service.claim_job_for_retry(db, job.id, rq_job_id)
+    except ValueError as exc:
+        raise HTTPException(409, detail={"code": "invalid_job_status", "message": str(exc)}) from exc
+    try:
+        queue_service.enqueue_batch_processing(
+            job_id=claimed.id, event_id=claimed.event_id,
+            media_ids=[m.id for m in candidates], rq_job_id=rq_job_id,
+        )
+    except Exception as exc:
+        job_service.mark_job_retry_enqueue_failed(db, claimed, previous_status)
+        raise HTTPException(503, detail={"code": "queue_unavailable", "message": "Could not enqueue retry. Please try again."}) from exc
+    return APIResponse(data=JobResumeResponse(
+        job_id=claimed.id, status="queued", rq_job_id=rq_job_id,
+        thread_id=claimed.langgraph_thread_id, message="Retrying failed and unfinished images; successful images are preserved.",
+    ), error=None)

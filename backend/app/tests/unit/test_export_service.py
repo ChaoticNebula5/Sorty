@@ -163,7 +163,9 @@ def test_should_include_media_in_export_respects_review_statuses() -> None:
 def test_create_export_blocks_pending_reviews(monkeypatch) -> None:
     event = SimpleNamespace(id=uuid.uuid4(), name="Event")
 
-    monkeypatch.setattr(export_service, "count_pending_reviews", lambda db, event_id: 1)
+    monkeypatch.setattr(
+        export_service.review_service, "count_event_review_queue", lambda db, event_id: 1
+    )
 
     with pytest.raises(export_service.ExportBlockedError):
         export_service.create_and_generate_export(

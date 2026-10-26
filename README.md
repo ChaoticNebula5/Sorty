@@ -228,6 +228,16 @@ docker compose run --rm backend python -m app.services.visual_backfill_service
 | Export | `/api/events/{event_id}/export`, `/api/exports/...` |
 | Public gallery | `/api/public/events/{public_slug}` |
 
+## Gemini rate limits and recovery
+
+Gemini retries transient rate-limit, timeout, and server errors with exponential backoff and jitter. Defaults are four total attempts per image, a 2-second base delay, a 30-second exponential delay cap, and a 120-second total wait budget. `Retry-After` and Google's `RetryInfo` take precedence; a longer provider delay stops the batch rather than retrying too early. SDK retries remain disabled so the two retry layers cannot multiply requests.
+
+Explicit daily/zero-quota errors stop further vision requests in that batch immediately. Retry exhaustion also stops remaining requests. Successful images and their saved analyses stay intact; unfinished images are retained as failures with an actionable batch message.
+
+After quota resets, or after changing the key and restarting the API/worker, use **Retry failed images** in Event Detail or batch history. The authenticated `POST /api/jobs/{job_id}/retry` endpoint queues only failed/unfinished work. It preserves successful images and human review decisions, reuses saved inference if indexing previously failed, and rejects retries while a batch is queued or processing. Restarting alone does not enqueue retries. The worker timeout is sized for the batch's request/retry budget.
+
+Settings are documented in `.env.example`. To run the PostgreSQL/MinIO recovery tests without external AI calls, set `SORTY_RETRY_INTEGRATION=1`, `EMBEDDING_PROVIDER=mock`, and `VISUAL_SEARCH_ENABLED=false`, then run `python -m pytest backend/app/tests/integration/test_retry_flow.py` against local infrastructure.
+
 ## Roadmap
 
 - Hosted backend deployment profile

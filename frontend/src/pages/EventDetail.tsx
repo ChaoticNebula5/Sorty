@@ -2,7 +2,8 @@ import { useState, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { getEvent, getEventJobs } from '@/api/events'
-import { uploadMediaBatch, getJobStatus } from '@/api/jobs'
+import { uploadMediaBatch, getJobStatus, retryJob } from '@/api/jobs'
+import { parseApiError } from '@/api/client'
 import { updateEventPublicSettings } from '@/api/events'
 import { UploadCloud, Loader2, CheckCircle2, AlertCircle, Clock, Globe, Link as LinkIcon, Copy } from 'lucide-react'
 import { StatusChip } from '@/components/ui/StatusChip'
@@ -218,9 +219,36 @@ function JobHistory({ jobs, activeJobId }: { jobs: BatchJob[]; activeJobId: stri
             <StatusChip tone={job.status === 'failed' ? 'danger' : job.status === 'completed' ? 'ok' : job.status === 'waiting_for_review' ? 'warn' : 'info'}>
               {job.id === activeJobId ? 'Viewing ' : ''}{job.status}
             </StatusChip>
+            {(job.failed_files > 0 || job.status === 'failed') && !['queued', 'processing'].includes(job.status) && <RetryImagesButton job={job} compact />}
           </div>
         ))}
       </div>
+    </div>
+  )
+}
+
+function RetryImagesButton({ job, compact = false }: { job: BatchJob; compact?: boolean }) {
+  const queryClient = useQueryClient()
+  const retryMutation = useMutation({
+    mutationFn: () => retryJob(job.id),
+    onSuccess: async () => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['job', job.id] }),
+        queryClient.invalidateQueries({ queryKey: ['event-jobs', job.event_id] }),
+      ])
+    },
+  })
+  return (
+    <div className="space-y-2">
+      <button
+        onClick={() => retryMutation.mutate()}
+        disabled={retryMutation.isPending}
+        className="rounded-sm bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50"
+      >
+        {retryMutation.isPending ? 'Queuing retry...' : 'Retry failed images'}
+      </button>
+      {!compact && <p className="text-xs text-muted-foreground">Successful images stay saved. If quota is exhausted, wait for reset or update the key and restart before retrying.</p>}
+      {retryMutation.isError && <p role="alert" className="text-sm text-danger">{parseApiError(retryMutation.error).message}</p>}
     </div>
   )
 }
@@ -254,6 +282,7 @@ function JobTracker({ job }: { job: BatchJob }) {
       </div>
 
       <div className="px-4 py-4">
+        {job.error_message && <p role="alert" className="mb-4 rounded-sm bg-danger/10 p-3 text-sm text-danger">{job.error_message}</p>}
         <div className="flex justify-between text-sm mb-4">
           <div className="flex flex-col">
             <span className="mono-label text-muted-foreground">Processed</span>
@@ -301,6 +330,10 @@ function JobTracker({ job }: { job: BatchJob }) {
             )
           })}
         </div>
+
+        {(job.failed_files > 0 || job.status === 'failed' || job.status === 'waiting_for_review') && !['queued', 'processing'].includes(job.status) && (
+          <div className="mt-6"><RetryImagesButton job={job} /></div>
+        )}
 
         {job.status === 'waiting_for_review' && (
           <div className="mt-6">

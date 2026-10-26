@@ -10,6 +10,7 @@ from pydantic import ValidationError
 
 from app.core.config import get_settings
 from app.schemas.ai import FolderSuggestion, ImageAnalysisResult
+from app.services.vision_retry import call_with_backoff
 
 
 class VisionProvider(Protocol):
@@ -66,8 +67,12 @@ class GeminiVisionProvider:
             raise ValueError("GEMINI_API_KEY is required when VISION_PROVIDER=gemini.")
 
         self._genai = _load_gemini_sdk()
-        self._genai.configure(api_key=self.api_key)
-        self._model = self._genai.GenerativeModel(self.model_name)
+        self._retry_options = {
+            "max_attempts": getattr(settings, "gemini_max_attempts", 4),
+            "base_delay": getattr(settings, "gemini_retry_base_seconds", 2),
+            "max_delay": getattr(settings, "gemini_retry_max_seconds", 30),
+            "wait_budget": getattr(settings, "gemini_retry_wait_budget_seconds", 120),
+        }
 
     def analyze_image(
         self,
@@ -77,7 +82,19 @@ class GeminiVisionProvider:
         prompt = _build_vision_prompt(event_context)
         with Image.open(image_path) as image:
             image.load()
-            response = self._model.generate_content([prompt, image])
+            with self._genai.Client(
+                api_key=self.api_key,
+                http_options={"timeout": 120_000, "retry_options": {"attempts": 1}},
+            ) as client:
+                response = call_with_backoff(lambda: client.models.generate_content(
+                    model=self.model_name,
+                    contents=[prompt, image],
+                    config={
+                        "response_mime_type": "application/json",
+                        "response_schema": ImageAnalysisResult,
+                        "max_output_tokens": 2048,
+                    },
+                ), **self._retry_options)
 
         raw_text = getattr(response, "text", None) or ""
         payload = _extract_json_payload(raw_text, provider_name="Gemini")
@@ -157,11 +174,11 @@ class OllamaVisionProvider:
 
 def _load_gemini_sdk():
     try:
-        import google.generativeai as genai
+        from google import genai
     except ImportError as exc:
         raise ValueError(
-            "Gemini provider requires google-generativeai. "
-            "Install with `pip install google-generativeai`."
+            "Gemini provider requires google-genai. "
+            "Install with `pip install google-genai`."
         ) from exc
     return genai
 
